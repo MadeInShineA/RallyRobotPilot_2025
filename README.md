@@ -5,55 +5,69 @@
 This repository holds a sandbox driving simulation controllable via a network interface as a machine learning and data collection challenge.  
 
 # Installation
-From the root of the repository, run
+
+Ensure `uv` is installed (see <https://github.com/astral-sh/uv>). From the root of the repository, run
+
 ```
-pip install -e .
+uv sync
 ```
 
 To run the game, you can use
+
 ```
-python scripts/main.py
+uv run scripts/main.py
 ```
 
 # Generality
-Launching main.py starts a race with a single car on the provided track. 
-This track can be controlled either by keyboard (*AWSD*) or by a socket interface. 
+
+Launching main.py starts a race with a single car on the provided track.
+This track can be controlled either by keyboard (*AWSD*) or by a socket interface.
 An example of such interface is included in the code in *example_data_collector.py*.
 
 # Sensing
+
 The car sensing is available in two commodities: **raycasts** and **images**. These sensing snapshots are sent at 10 Hertz (i.e. 10 times a second). Due to this fact, correct recetion of snapshot messages has to be done regularly (See Server buffer saturation section).
 
 # Communication protocol
 
-A remote controller can be impemented using TCP socket connecting on localhost on port 7654. 
+A remote controller can be impemented using TCP socket connecting on localhost on port 7654.
 Different commands can be issued to the race simulation to control the car.
 
-The car simulator expect specific commands to be sent. A command is a specific set of words or numbers. 
+The car simulator expect specific commands to be sent. A command is a specific set of words or numbers.
 **Spaces** are used as elements separator in a single command. **Semi-colon (;)** as command separator.
 
-##  Car controls
+## Car controls
+
 ```
 push|release forward|right|left|back;
 ```
+
 To simulate key press and control the car.
 
 ## Reset controls
+
 ```
 set position x,y,z;
 ```
+
 To set the reset position at the (x,y,z) location. x,y,z are float numbers with english style dot separator (e,g. 3.1415, 2.5, 6.34234) themselves separated by a comma.
+
 ```
 set rotation a;
 ```
+
 to set the car orientation, with a being a float number in degrees
+
 ```
 set speed v;
 ```
+
 to set the starting speed after reset
 
 ```
 reset;
 ```
+
 to reset the car at the provided location.
 
 ## Ray sensing
@@ -61,11 +75,13 @@ to reset the car at the provided location.
 ```
 set ray visible|hidden;
 ```
+
 To toggle the ray sensor visibility. In direct play **v** can be used to toggle ray visibility
 
-##  /!\ Server buffer saturation
-While implementing your own controller, make sure to regularly empty the socket buffer connected to the server by regularly calling **NetworkDataCmdInterface.recv_msgs**. 
-Otherwise, while sending images, the server might fill the buffer and throw socket errors leading to a crash. 
+## /!\ Server buffer saturation
+
+While implementing your own controller, make sure to regularly empty the socket buffer connected to the server by regularly calling **NetworkDataCmdInterface.recv_msgs**.
+Otherwise, while sending images, the server might fill the buffer and throw socket errors leading to a crash.
 
 # Multiplayer
 
@@ -83,22 +99,19 @@ SPACE - Hand Brake
 ESCAPE - Pause Menu
 G - Respawn
 
-# Run in Docker 
-We provide two docker containers to run the game: one that launches the usual graphic version (only runs on Linux host with X11), 
-and one that runs the game on a headless server (will be used for model training).
+# Run in Docker
 
+We provide two docker containers to run the game: one that launches the usual graphic version (only runs on Linux host with X11),
+and one that runs the game on a headless server (will be used for model training).
 
 The graphical container can be run using
 
-
 `docker compose run gui`
 
-
-and the headless one can be run using 
-
+and the headless one can be run using
 
 `docker compose run headless`
 
-
 # Credits
+
 This code is based on the repository [https://github.com/mandaw2014/Rally](https://github.com/mandaw2014/Rally)
