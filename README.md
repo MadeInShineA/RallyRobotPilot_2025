@@ -24,6 +24,28 @@ To run the game, you can use
 uv run scripts/main.py
 ```
 
+# Training the Autopilot
+
+To train the autopilot, run:
+
+```
+uv run model_notebook.py
+```
+
+# Running the Game with Autopilot
+
+To run the game with the autopilot, execute the following commands:
+
+```
+uv run scripts/main.py
+```
+
+and
+
+```
+uv run scripts/autopilot.py
+```
+
 # Generality
 
 Launching main.py starts a race with a single car on the provided track.

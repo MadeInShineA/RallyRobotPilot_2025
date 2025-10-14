@@ -10,11 +10,11 @@ from data_collector import DataCollectionUI
 This file is provided as an example of what a simplistic controller could be done.
 It simply uses the DataCollectionUI interface zo receive sensing_messages and send controls.
 
- /!\ Be warned that if the processing time of NNMsgProcessor.process_message is superior to the message reception period, a lag between the images processed and commands sent.
+/!\ Be warned that if the processing time of NNMsgProcessor.process_message is superior to the message reception period, a lag between the images processed and commands sent.
 One might want to only process the last sensing_message received, etc. 
 Be warned that this could also cause crash on the client side if socket sending buffer overflows
 
- /!\ Do not work directly in this file (make a copy and rename it) to prevent future pull from erasing what you write here.
+/!\ Do not work directly in this file (make a copy and rename it) to prevent future pull from erasing what you write here.
 """
 
 
@@ -39,6 +39,9 @@ class ExampleNNMsgProcessor:
         self.always_forward = False
         # Load scaler
         self.scaler_X = joblib.load("./model/scaler_X.joblib")
+        # Remove feature names to avoid warning when transforming numpy array
+        if hasattr(self.scaler_X, "feature_names_in_"):
+            del self.scaler_X.feature_names_in_
         # Load model
         self.model = DrivingPolicy(input_dim=16)  # 15 raycasts + 1 speed
         self.model.load_state_dict(
