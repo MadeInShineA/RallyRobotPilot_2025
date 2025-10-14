@@ -20,17 +20,26 @@ def _():
         mean_absolute_error,
         mean_squared_error,
         confusion_matrix,
+        f1_score,
+        accuracy_score,
+        classification_report
     )
     import joblib
     import torch
     import torch.nn as nn
     import torch.optim as optim
     from torch.utils.data import DataLoader, TensorDataset
+    from sklearn.model_selection import KFold
+
     return (
         DataLoader,
+        KFold,
         MinMaxScaler,
         TensorDataset,
+        accuracy_score,
+        classification_report,
         confusion_matrix,
+        f1_score,
         joblib,
         lzma,
         mo,
@@ -398,7 +407,7 @@ def _(
 
     os.makedirs("model", exist_ok=True)
     joblib.dump(scaler_X, "model/scaler_X.joblib")
-    return X_test_scaled, X_train, X_train_scaled, y_test, y_train
+    return X_train_scaled, y_train
 
 
 @app.cell
@@ -415,42 +424,38 @@ def _(y_train):
 
 @app.cell
 def _(mo):
-    mo.md(r"""## Building prediction nn""")
+    mo.md(r"""## Building prediction neural network""")
     return
 
 
 @app.cell
 def _(
     DataLoader,
+    KFold,
     TensorDataset,
-    X_test_scaled,
-    X_train,
     X_train_scaled,
+    accuracy_score,
+    classification_report,
+    f1_score,
     nn,
     np,
     optim,
     torch,
-    y_test,
     y_train,
 ):
-    # --- Convert to tensors ---
-    X_train_torch = torch.tensor(X_train_scaled.to_numpy(), dtype=torch.float32)
-    y_train_torch = torch.tensor(y_train.to_numpy(), dtype=torch.float32)
-    X_test_torch = torch.tensor(X_test_scaled.to_numpy(), dtype=torch.float32)
-    y_test_torch = torch.tensor(y_test.to_numpy(), dtype=torch.float32)
+    # --- Hyperparameters ---
+    n_splits = 5
+    epochs = 200
+    batch_size = 256
+    learning_rate = 1e-2
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # --- Convert labels to classes ( -1 -> 0, 0 -> 1, 1 -> 2 ) ---
-    y_train_classes = (y_train_torch + 1).long()
-    y_test_classes = (y_test_torch + 1).long()
+    # --- Data Conversion ---
+    X_np = X_train_scaled.to_numpy()  # convert polars dataframe to numpy
+    y_np = y_train.to_numpy()
+    y_np = (y_np + 1).astype(np.int64)  # map [-1,0,1] to [0,1,2]
 
-    # --- Create datasets & loaders ---
-    train_dataset = TensorDataset(X_train_torch, y_train_classes)
-    test_dataset = TensorDataset(X_test_torch, y_test_classes)
-
-    train_loader = DataLoader(train_dataset, batch_size=256, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=256, shuffle=False)
-
-    # --- Define model ---
+    # --- Model Definition ---
     class DrivingPolicy(nn.Module):
         def __init__(self, input_dim, hidden_dim=128):
             super().__init__()
@@ -459,98 +464,219 @@ def _(
                 nn.ReLU(),
                 nn.Linear(hidden_dim, hidden_dim),
                 nn.ReLU(),
-                nn.Linear(hidden_dim, 6),  # 2 outputs * 3 classes
+                nn.Linear(hidden_dim, 6),  # 2 outputs × 3 classes
             )
 
         def forward(self, x):
-            out = self.net(x)
-            return out.view(-1, 2, 3)  # (batch, 2, 3)
+            return self.net(x).view(-1, 2, 3)
 
-    # --- Initialize ---
-    n_inputs = X_train.shape[1]  # e.g., 10 raycasts + 1 speed = 11
-    model = DrivingPolicy(n_inputs)
-    criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    # --- Metric Storage ---
+    metrics_per_fold = []
 
-    # --- Training loop ---
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model.to(device)
+    all_y_true = []
+    all_y_pred = []
 
-    epochs = 100
-    for epoch in range(epochs):
-        model.train()
-        train_loss = 0.0
-        for batch_X, batch_y in train_loader:
-            batch_X, batch_y = batch_X.to(device), batch_y.to(device)
+    # --- K-Fold Loop ---
+    kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
 
-            optimizer.zero_grad()
-            outputs = model(batch_X)  # (batch, 2, 3)
-            loss = criterion(outputs.view(-1, 3), batch_y.view(-1))
-            loss.backward()
-            optimizer.step()
+    for fold, (train_idx, val_idx) in enumerate(kf.split(X_np)):
+        print(f"\n🔁 Fold {fold+1}/{n_splits}")
+        print("-" * 40)
 
-            train_loss += loss.item()
+        # Data setup
+        X_tr = torch.tensor(X_np[train_idx], dtype=torch.float32)
+        X_val = torch.tensor(X_np[val_idx], dtype=torch.float32)
+        y_tr = torch.tensor(y_np[train_idx], dtype=torch.long)
+        y_val = torch.tensor(y_np[val_idx], dtype=torch.long)
 
-        # Validation
-        model.eval()
-        val_loss = 0.0
-        all_preds = []
-        all_targets = []
-        with torch.no_grad():
-            for batch_X, batch_y in test_loader:
+        train_loader = DataLoader(TensorDataset(X_tr, y_tr), batch_size=batch_size, shuffle=True)
+        val_loader = DataLoader(TensorDataset(X_val, y_val), batch_size=batch_size)
+
+        # Model, optimizer, loss
+        model = DrivingPolicy(X_tr.shape[1]).to(device)
+        optimizer = optim.Adam(model.parameters(), lr=learning_rate)
+        criterion = nn.CrossEntropyLoss()
+
+        # Tracking
+        train_losses = []
+        train_throttle_accs = []
+        train_steer_accs = []
+        val_throttle_accs = []
+        val_steer_accs = []
+
+        # --- Training Loop ---
+        for epoch in range(1, epochs + 1):
+            model.train()
+            epoch_loss = 0.0
+            for batch_X, batch_y in train_loader:
                 batch_X, batch_y = batch_X.to(device), batch_y.to(device)
-                outputs = model(batch_X)  # (batch, 2, 3)
-                val_loss += criterion(outputs.view(-1, 3), batch_y.view(-1)).item()
-                all_preds.append(outputs.cpu())
-                all_targets.append(batch_y.cpu())
+                optimizer.zero_grad()
+                outputs = model(batch_X)
+                loss = criterion(outputs.view(-1, 3), batch_y.view(-1))
+                loss.backward()
+                optimizer.step()
+                epoch_loss += loss.item()
 
-        y_pred_val = torch.cat(all_preds)  # (N, 2, 3)
-        y_true_val = torch.cat(all_targets).numpy()  # (N, 2)
+            train_losses.append(epoch_loss / len(train_loader))
 
-        y_pred_classes = torch.argmax(y_pred_val, dim=2).numpy()  # (N, 2)
+            # --- Train accuracy ---
+            model.eval()
+            train_preds = []
+            train_targets = []
+            with torch.no_grad():
+                for batch_X, batch_y in train_loader:
+                    batch_X = batch_X.to(device)
+                    outputs = model(batch_X)
+                    preds = torch.argmax(outputs.cpu(), dim=2)
+                    train_preds.append(preds)
+                    train_targets.append(batch_y)
 
-        accuracy_throttle = np.mean(y_true_val[:, 0] == y_pred_classes[:, 0])
-        accuracy_steer = np.mean(y_true_val[:, 1] == y_pred_classes[:, 1])
+            y_pred_train = torch.cat(train_preds).numpy()
+            y_true_train = torch.cat(train_targets).numpy()
 
-        if (epoch + 1) % 10 == 0:
-            print(
-                f"Epoch {epoch + 1}/{epochs} | "
-                f"Train Loss: {train_loss / len(train_loader):.4f} | "
-                f"Val Loss: {val_loss / len(test_loader):.4f}"
-            )
-            print(
-                f"Accuracy Throttle: {accuracy_throttle:.4f}, Accuracy Steer: {accuracy_steer:.4f}"
-            )
+            train_throttle_acc = accuracy_score(y_true_train[:, 0], y_pred_train[:, 0])
+            train_steer_acc = accuracy_score(y_true_train[:, 1], y_pred_train[:, 1])
 
-    # --- Save model ---
-    torch.save(model.state_dict(), "model/driving_policy.pth")
-    print("✅ Model saved to 'model/driving_policy.pth'")
-    return X_test_torch, device, model
+            train_throttle_accs.append(train_throttle_acc)
+            train_steer_accs.append(train_steer_acc)
+
+            # --- Validation accuracy ---
+            val_preds = []
+            val_targets = []
+            with torch.no_grad():
+                for batch_X, batch_y in val_loader:
+                    batch_X = batch_X.to(device)
+                    outputs = model(batch_X)
+                    preds = torch.argmax(outputs.cpu(), dim=2)
+                    val_preds.append(preds)
+                    val_targets.append(batch_y)
+
+            y_pred_val = torch.cat(val_preds).numpy()
+            y_true_val = torch.cat(val_targets).numpy()
+
+            val_throttle_acc = accuracy_score(y_true_val[:, 0], y_pred_val[:, 0])
+            val_steer_acc = accuracy_score(y_true_val[:, 1], y_pred_val[:, 1])
+
+            val_throttle_accs.append(val_throttle_acc)
+            val_steer_accs.append(val_steer_acc)
+
+            # Append for global confusion matrix after last epoch only (or could do after fold)
+            if epoch == epochs:
+                all_y_true.append(y_true_val)
+                all_y_pred.append(y_pred_val)
+
+            print(f"Epoch {epoch:03} | Loss: {epoch_loss:.4f} | "
+                  f"Train Throttle Acc: {train_throttle_acc:.3f} | Train Steer Acc: {train_steer_acc:.3f} | "
+                  f"Val Throttle Acc: {val_throttle_acc:.3f} | Val Steer Acc: {val_steer_acc:.3f}")
+
+        # --- Final Metrics for Fold ---
+        throttle_f1 = f1_score(y_true_val[:, 0], y_pred_val[:, 0], average="macro")
+        steer_f1 = f1_score(y_true_val[:, 1], y_pred_val[:, 1], average="macro")
+
+        print("\nThrottle Classification Report:")
+        print(classification_report(y_true_val[:, 0], y_pred_val[:, 0], target_names=["-1", "0", "1"]))
+        print("Steer Classification Report:")
+        print(classification_report(y_true_val[:, 1], y_pred_val[:, 1], target_names=["-1", "0", "1"]))
+
+        metrics_per_fold.append({
+            "train_loss": train_losses,
+            "train_throttle_acc": train_throttle_accs,
+            "train_steer_acc": train_steer_accs,
+            "val_throttle_acc": val_throttle_accs,
+            "val_steer_acc": val_steer_accs,
+            "final_throttle_acc": val_throttle_accs[-1],
+            "final_steer_acc": val_steer_accs[-1],
+            "throttle_f1": throttle_f1,
+            "steer_f1": steer_f1
+        })
+    return all_y_pred, all_y_true, epochs, metrics_per_fold
 
 
 @app.cell
-def _():
+def _(epochs, metrics_per_fold, np, plt):
+    # --- 📊 Per-Fold Combined Plots ---
+    for _fold, metrics in enumerate(metrics_per_fold):
+        epochs_range = np.arange(1, epochs + 1)
+
+        # Compute errors (1 - accuracy)
+        train_throttle_error = 1 - np.array(metrics["train_throttle_acc"])
+        val_throttle_error = 1 - np.array(metrics["val_throttle_acc"])
+        train_steer_error = 1 - np.array(metrics["train_steer_acc"])
+        val_steer_error = 1 - np.array(metrics["val_steer_acc"])
+
+        plt.figure(figsize=(18, 5))
+        plt.suptitle(f"Fold {_fold + 1} Training Metrics")
+
+        # --- Plot 1: Train Loss ---
+        plt.subplot(1, 3, 1)
+        plt.plot(epochs_range, metrics["train_loss"], label="Train Loss", color="blue")
+        plt.xlabel("Epoch")
+        plt.ylabel("Loss")
+        plt.title("Train Loss")
+        plt.grid(True)
+
+        # --- Plot 2: Throttle Errors ---
+        plt.subplot(1, 3, 2)
+        plt.plot(epochs_range, train_throttle_error, label="Throttle Train Error", color="green", linestyle='-')
+        plt.plot(epochs_range, val_throttle_error, label="Throttle Val Error", color="green", linestyle='--')
+        plt.xlabel("Epoch")
+        plt.ylabel("Error (1 - Accuracy)")
+        plt.title("Throttle Train vs Validation Error")
+        plt.legend()
+        plt.grid(True)
+
+        # --- Plot 3: Steer Errors ---
+        plt.subplot(1, 3, 3)
+        plt.plot(epochs_range, train_steer_error, label="Steer Train Error", color="orange", linestyle='-')
+        plt.plot(epochs_range, val_steer_error, label="Steer Val Error", color="orange", linestyle='--')
+        plt.xlabel("Epoch")
+        plt.ylabel("Error (1 - Accuracy)")
+        plt.title("Steer Train vs Validation Error")
+        plt.legend()
+        plt.grid(True)
+
+        plt.tight_layout(rect=[0, 0, 1, 0.92])
+        plt.show()
+
     return
 
 
 @app.cell
-def _(X_test_torch, confusion_matrix, device, model, np, plt, torch, y_test):
-    # Get predictions
-    model.eval()
-    with torch.no_grad():
-        y_pred_logits = model(X_test_torch.to(device)).cpu()  # (N, 2, 3)
+def _(metrics_per_fold, plt):
+    # --- Summary Plots Across Folds ---
+    throttle_accuracies = [m["final_throttle_acc"] for m in metrics_per_fold]
+    steer_accuracies = [m["final_steer_acc"] for m in metrics_per_fold]
+    throttle_f1s = [m["throttle_f1"] for m in metrics_per_fold]
+    steer_f1s = [m["steer_f1"] for m in metrics_per_fold]
 
-    y_pred = torch.argmax(y_pred_logits, dim=2).numpy()  # (N, 2)
-    y_true = y_test.to_numpy()
-    y_true_classes = (y_true + 1).astype(int)  # -1 -> 0, 0 -> 1, 1 -> 2
+    plt.figure(figsize=(12, 5))
 
-    # Plot confusion matrices
+    plt.subplot(1, 2, 1)
+    plt.boxplot([throttle_accuracies, steer_accuracies], tick_labels=["Throttle", "Steer"])
+    plt.title("Final Accuracy per Fold")
+    plt.ylabel("Accuracy")
+
+    plt.subplot(1, 2, 2)
+    plt.boxplot([throttle_f1s, steer_f1s], tick_labels=["Throttle", "Steer"])
+    plt.title("Final F1 Score per Fold")
+    plt.ylabel("F1 Score")
+
+    plt.tight_layout()
+    plt.show()
+    return
+
+
+@app.cell
+def _(all_y_pred, all_y_true, confusion_matrix, np, plt):
+    # --- Confusion Matrices (Global) ---
+    y_true = np.concatenate(all_y_true, axis=0)
+    y_pred = np.concatenate(all_y_pred, axis=0)
+
     _fig, _axes = plt.subplots(1, 2, figsize=(12, 5))
 
     # ---------- Throttle ----------
-    cm_throttle = confusion_matrix(y_true_classes[:, 0], y_pred[:, 0], labels=[0, 1, 2]).T
+    cm_throttle = confusion_matrix(y_true[:, 0], y_pred[:, 0], labels=[0, 1, 2]).T
     _im0 = _axes[0].imshow(cm_throttle, cmap="Blues", aspect="auto")
-
     _axes[0].set_xticks([0, 1, 2])
     _axes[0].set_xticklabels(["-1", "0", "1"])
     _axes[0].set_yticks([0, 1, 2])
@@ -559,23 +685,16 @@ def _(X_test_torch, confusion_matrix, device, model, np, plt, torch, y_test):
     _axes[0].set_ylabel("Predicted Throttle")
     _axes[0].set_title("Throttle Confusion Matrix")
     plt.colorbar(_im0, ax=_axes[0], shrink=0.8)
-
-    # Add text annotations
-    for _i in range(3):  # predicted labels (rows)
-        for _j in range(3):  # true labels (columns)
-            _value = cm_throttle[_i, _j]
-            _axes[0].text(
-                _j, _i,
-                str(_value),
-                ha="center",
-                va="center",
-                color="black" if _value < np.max(cm_throttle) / 2 else "white"
-            )
+    for _i in range(3):
+        for _j in range(3):
+            val = cm_throttle[_i, _j]
+            _axes[0].text(_j, _i, str(val),
+                          ha="center", va="center",
+                          color="black" if val < np.max(cm_throttle)/2 else "white")
 
     # ---------- Steer ----------
-    cm_steer = confusion_matrix(y_true_classes[:, 1], y_pred[:, 1], labels=[0, 1, 2]).T
+    cm_steer = confusion_matrix(y_true[:, 1], y_pred[:, 1], labels=[0, 1, 2]).T
     _im1 = _axes[1].imshow(cm_steer, cmap="Blues", aspect="auto")
-
     _axes[1].set_xticks([0, 1, 2])
     _axes[1].set_xticklabels(["-1", "0", "1"])
     _axes[1].set_yticks([0, 1, 2])
@@ -584,18 +703,12 @@ def _(X_test_torch, confusion_matrix, device, model, np, plt, torch, y_test):
     _axes[1].set_ylabel("Predicted Steer")
     _axes[1].set_title("Steer Confusion Matrix")
     plt.colorbar(_im1, ax=_axes[1], shrink=0.8)
-
-    # Add text annotations
-    for _i in range(3):  # predicted labels (rows)
-        for _j in range(3):  # true labels (columns)
-            _value = cm_steer[_i, _j]
-            _axes[1].text(
-                _j, _i,
-                str(_value),
-                ha="center",
-                va="center",
-                color="black" if _value < np.max(cm_steer) / 2 else "white"
-            )
+    for _i in range(3):
+        for _j in range(3):
+            val = cm_steer[_i, _j]
+            _axes[1].text(_j, _i, str(val),
+                          ha="center", va="center",
+                          color="black" if val < np.max(cm_steer)/2 else "white")
 
     plt.tight_layout()
     plt.show()
