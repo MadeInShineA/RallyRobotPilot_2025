@@ -1,27 +1,10 @@
-import marimo
+import marimo as mo
+import lzma
+import pickle
+import os
+import polars as pl
 
-__generated_with = "0.16.5"
-app = marimo.App(width="medium")
-
-
-@app.cell
-def _():
-    import marimo as mo
-    import lzma
-    import pickle
-    import os
-    import polars as pl
-    return lzma, mo, os, pickle, pl
-
-
-@app.cell
-def _(mo):
-    mo.md(r"""## Load the different records""")
-    return
-
-
-@app.cell
-def _(lzma, os, pickle, pl):
+if __name__ == "__main__":
     record_dir = "./records/"
 
     output_dir = "./records_csv/"
@@ -67,13 +50,3 @@ def _(lzma, os, pickle, pl):
             print(f"✅ Converted {filename} → {csv_filename} (excluded image data)")
         except Exception as e:
             print(f"❌ Error converting {filename}: {e}")
-    return
-
-
-@app.cell
-def _():
-    return
-
-
-if __name__ == "__main__":
-    app.run()
