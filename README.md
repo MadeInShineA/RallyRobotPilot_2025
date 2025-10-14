@@ -12,6 +12,12 @@ Ensure `uv` is installed (see <https://github.com/astral-sh/uv>). From the root 
 uv sync
 ```
 
+and
+
+```
+uv pip install -e .
+```
+
 To run the game, you can use
 
 ```
