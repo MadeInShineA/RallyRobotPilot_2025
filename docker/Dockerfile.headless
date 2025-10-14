@@ -1,44 +1,50 @@
-# Dockerfile
-FROM debian:stable-slim
-RUN apt-get -y update
-RUN apt install libgl1-mesa-glx -y
-RUN apt-get install 'ffmpeg'\
-    'libsm6'\
-    'libxext6'  -y
+# Use a specific Debian version for reproducibility (optional but recommended)
+FROM python:3.13-slim
 
-# Headless part.
-RUN apt-get update -y \
-  && apt-get install --no-install-recommends -y xvfb libgl1-mesa-dri
-  
+# Install system dependencies in a single layer to reduce image size
+RUN apt-get update -y && \
+    apt-get install -y --no-install-recommends \
+        ffmpeg \
+        libsm6 \
+        libxext6 \
+        libgl1 \
+        xvfb \
+        libgl1-mesa-dri \
+        mesa-utils \
+        python3-pip \
+        python3-venv \
+        libx11-6 \
+        libxrandr2 \
+        libxinerama1 \
+        libxcursor1 \
+        libxi6 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy and prepare Xvfb startup script
 WORKDIR /usr/bin
-COPY xvfb-startup.sh .
+COPY docker/xvfb-startup.sh xvfb-startup.sh
+RUN chmod +x xvfb-startup.sh && sed -i 's/\r$//' xvfb-startup.sh
 
-RUN sed -i 's/\r$//' xvfb-startup.sh
+# Set environment for Xvfb
 ARG RESOLUTION="1920x1080x24"
-ENV XVFB_RES="${RESOLUTION}"
 ARG XARGS=""
+ENV XVFB_RES="${RESOLUTION}"
 ENV XVFB_ARGS="${XARGS}"
-ENTRYPOINT ["/bin/bash", "xvfb-startup.sh"]
 
-RUN apt-get update -y \
-  && apt-get install --no-install-recommends -y mesa-utils
-
-# Rally part.
-WORKDIR /app
-RUN apt-get update && apt-get install -y git && apt-get clean
-RUN git clone https://github.com/ISC-HEI/RallyRoboPilot.git .
-COPY . .
-
-RUN set -xe \
-    && apt-get update \
-    && apt-get install -y python3-pip  \
-    && apt-get install -y python3-venv
-
-# Set env path. 
+# Set up Python virtual environment
 ENV VIRTUAL_ENV=/opt/venv
 RUN python3 -m venv $VIRTUAL_ENV
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
-RUN pip install --upgrade pip && pip install --no-cache-dir -e .
-RUN pip install python3_xlib
 
+# Install the application from current repository
+WORKDIR /app
+COPY . .
+
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -e . && \
+    pip install python3-xlib && \
+    pip install -r requirements.txt
+
+# Entry point and default command
+ENTRYPOINT ["/bin/bash", "/usr/bin/xvfb-startup.sh"]
 CMD ["python", "scripts/main.py"]

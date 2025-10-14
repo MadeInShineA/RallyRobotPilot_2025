@@ -15,8 +15,8 @@ services:
 
   headless:
     build:
-      context: .
-      dockerfile: Dockerfile.headless
+      context: ..
+      dockerfile: docker/Dockerfile.headless
     stdin_open: true                # Keep stdin open even if not attached
     tty: true                       # Allocate a pseudo-TTY
     ports:
