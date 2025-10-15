@@ -70,7 +70,7 @@ def _(mo):
 
 @app.cell
 def _(lzma, os, pickle, pl):
-    record_dir = "./data/"
+    record_dir = "./records/"
 
     all_records = []  # Accumulate all records here
 
@@ -489,10 +489,19 @@ def _(
     X_test_scaled = pl.DataFrame(X_test_scaled, schema=feature_cols)
 
     # --- 5. Encode labels as Polars DataFrames (throttle, steer)
-    y_train = df_train.select("forward", "back", "left", "right")
+    y_train = df_train.select(
+        [
+            (pl.col("forward") - pl.col("back")).alias("throttle (forward - back)"),
+            (pl.col("right") - pl.col("left")).alias("steer (right - left"),
+        ]
+    )
 
-    y_test = df_test.select("forward", "back", "left", "right")
-
+    y_test = df_test.select(
+        [
+            (pl.col("forward") - pl.col("back")).alias("throttle (forward - back)"),
+            (pl.col("right") - pl.col("left")).alias("steer (right - left)"),
+        ]
+    )
     os.makedirs("model", exist_ok=True)
     joblib.dump(scaler_X, "model/scaler_X.joblib")
     return X_test_scaled, X_train_scaled, y_test, y_train
