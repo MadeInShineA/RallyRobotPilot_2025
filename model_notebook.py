@@ -14,7 +14,7 @@ def _():
     import matplotlib.pyplot as plt
     import numpy as np
     from sklearn.model_selection import train_test_split
-    from sklearn.preprocessing import MinMaxScaler
+    from sklearn.preprocessing import RobustScaler
     from sklearn.metrics import (
         r2_score,
         mean_absolute_error,
@@ -30,10 +30,11 @@ def _():
     import torch.optim as optim
     from torch.utils.data import DataLoader, TensorDataset
     from sklearn.model_selection import KFold
+    import seaborn as sns
     return (
         DataLoader,
         KFold,
-        MinMaxScaler,
+        RobustScaler,
         TensorDataset,
         accuracy_score,
         classification_report,
@@ -49,6 +50,7 @@ def _():
         pickle,
         pl,
         plt,
+        sns,
         torch,
         train_test_split,
     )
@@ -68,7 +70,7 @@ def _(mo):
 
 @app.cell
 def _(lzma, os, pickle, pl):
-    record_dir = "./records/"
+    record_dir = "./data/"
 
     all_records = []  # Accumulate all records here
 
@@ -228,6 +230,12 @@ def _(mo):
 def _(df_last_frames_cleaned, pl):
     records_lengths = df_last_frames_cleaned.group_by("record").agg(pl.len())
     records_lengths
+    return (records_lengths,)
+
+
+@app.cell
+def _(records_lengths):
+    records_lengths.select("len").sum()
     return
 
 
@@ -246,7 +254,7 @@ def _(df_lengths_filtered):
     cleaned_records = df_lengths_filtered["record"].unique()
 
     cleaned_records
-    return (cleaned_records,)
+    return
 
 
 @app.cell
@@ -256,53 +264,24 @@ def _(mo):
 
 
 @app.cell
-def _(axes, cleaned_records, df_lengths_filtered, np, pl, plt):
-    # Get unique filenames
-    n_files = len(cleaned_records)
-    cols = 2
-    rows = (n_files + cols - 1) // cols  # ceil division
-
-    _fig, _axes = plt.subplots(
-        rows, cols, figsize=(12, 4 * rows), sharex=False, sharey=True
-    )
-    _axes = _axes.flatten() if n_files > 1 else [axes]
-
-    for idx, fname in enumerate(cleaned_records):
-        _ax = _axes[idx]
-        subset = df_lengths_filtered.filter(pl.col("record") == fname).sort("frame_idx")
-        frames = subset["frame_idx"].to_numpy()
-
-        # Stack the controls
-        controls = np.vstack(
-            [
-                subset["forward"].to_numpy(),
-                subset["back"].to_numpy(),
-                subset["left"].to_numpy(),
-                subset["right"].to_numpy(),
-            ]
+def _(df_lengths_filtered, pl, sns):
+    def ctrl_stripplots():
+        control_names = ["forward", "back", "left", "right"]
+        subset = df_lengths_filtered.select(
+            ["frame_idx", "record"] + control_names
         )
+        long_df = subset.unpivot(
+            on=control_names,
+            index=("frame_idx", "record"),
+            variable_name="control",
+            value_name="active"
+        ).filter(pl.col("active") == 1)
 
-        _ax.stackplot(
-            frames,
-            controls,
-            labels=["Forward", "Back", "Left", "Right"],
-            colors=["green", "red", "blue", "orange"],
-            alpha=0.7,
-        )
+        g = sns.FacetGrid(long_df, row="record", aspect=3)
+        return g.map_dataframe(sns.stripplot, x="frame_idx", y="control", hue="control", palette=["green", "red", "blue", "orange"])
 
-        _ax.set_title(f"Controls over time: {fname}")
-        _ax.set_xlabel("Frame")
-        _ax.set_ylabel("Active Controls")
-        _ax.legend(loc="upper right")
-        _ax.set_ylim(0, None)  # Ensure baseline at 0
-        _ax.grid(True, linestyle="--", alpha=0.5)
 
-    # Hide unused subplots
-    for _j in range(idx + 1, len(_axes)):
-        _fig.delaxes(_axes[_j])
-
-    plt.tight_layout()
-    plt.show()
+    ctrl_stripplots()
     return
 
 
@@ -481,7 +460,7 @@ def _(mo):
 
 @app.cell
 def _(
-    MinMaxScaler,
+    RobustScaler,
     df_lengths_filtered,
     joblib,
     os,
@@ -501,7 +480,7 @@ def _(
     X_test = df_test.select(feature_cols)
 
     # --- 4. Scale inputs and convert back to Polars DataFrames
-    scaler_X = MinMaxScaler()
+    scaler_X = RobustScaler()
     X_train_scaled = scaler_X.fit_transform(X_train)  # returns np.ndarray
     X_test_scaled = scaler_X.transform(X_test)
 
@@ -510,19 +489,9 @@ def _(
     X_test_scaled = pl.DataFrame(X_test_scaled, schema=feature_cols)
 
     # --- 5. Encode labels as Polars DataFrames (throttle, steer)
-    y_train = df_train.select(
-        [
-            (pl.col("forward") - pl.col("back")).alias("throttle (forward - back)"),
-            (pl.col("right") - pl.col("left")).alias("steer (right - left"),
-        ]
-    )
+    y_train = df_train.select("forward", "back", "left", "right")
 
-    y_test = df_test.select(
-        [
-            (pl.col("forward") - pl.col("back")).alias("throttle (forward - back)"),
-            (pl.col("right") - pl.col("left")).alias("steer (right - left)"),
-        ]
-    )
+    y_test = df_test.select("forward", "back", "left", "right")
 
     os.makedirs("model", exist_ok=True)
     joblib.dump(scaler_X, "model/scaler_X.joblib")
@@ -550,17 +519,14 @@ def _(mo):
 @app.cell
 def _():
     architectures = [
-        ("1_layer_64_ReLU", [64], "ReLU"),
+
+        ("1_layer_16_ReLU", [16], "ReLU"),
+        ("1_layer_32_ReLU", [32], "ReLU"),
         ("1_layer_128_ReLU", [128], "ReLU"),
-        ("1_layer_256_ReLU", [256], "ReLU"),
 
-        ("1_layer_64_Tanh", [64], "Tanh"),
-        ("1_layer_128_Tanh", [128], "Tanh"),
-        ("1_layer_256_Tanh", [256], "Tanh"),
-
-        ("1_layer_64_Sigmoid", [64], "Sigmoid"),
-        ("1_layer_128_Sigmoid", [128], "Sigmoid"),
-        ("1_layer_256_Sigmoid", [256], "Sigmoig"),
+        ("2_layer_16_8_ReLU", [16, 8], "ReLU"),
+        ("2_layer_32_8_ReLU", [32, 8], "ReLU"),
+        ("2_layer_32_16_ReLU", [32, 16], "ReLU"),
     ]
     return (architectures,)
 
@@ -590,10 +556,12 @@ def _(
 
     # --- Hyperparameters ---
     n_splits = 2
-    epochs = 50
+    epochs = 100
     batch_size = 256
-    learning_rate = 1e-2
+    learning_rate = 5e-2
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    criterion = nn.CrossEntropyLoss()
 
     # --- Data Preparation ---
     X_train_np = X_train_scaled.to_numpy()  # Convert Polars dataframe to numpy
@@ -664,7 +632,6 @@ def _(
 
     # --- K-Fold Cross Validation ---
     metrics_per_arch = {arch_name: [] for arch_name, _, _ in architectures}
-    criterion = nn.CrossEntropyLoss()
 
     kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
 
@@ -737,7 +704,6 @@ def _(
         DrivingPolicy,
         X_train_np,
         batch_size,
-        criterion,
         device,
         epochs,
         learning_rate,
@@ -882,10 +848,10 @@ def _(
     batch_size,
     best_activation,
     best_hidden_layers,
-    criterion,
     device,
     epochs,
     learning_rate,
+    nn,
     optim,
     torch,
     train_one_epoch,
@@ -898,10 +864,11 @@ def _(
     full_train_loader = DataLoader(TensorDataset(X_full, y_full), batch_size=batch_size, shuffle=True)
 
     final_model = DrivingPolicy(X_full.shape[1], best_hidden_layers, best_activation).to(device)
-    optimizer = optim.Adam(final_model.parameters(), lr=learning_rate)
+    final_criterion = nn.CrossEntropyLoss()
+    final_optimizer = optim.Adam(final_model.parameters(), lr=learning_rate)
 
     for _epoch in range(1, epochs + 1):
-        _loss = train_one_epoch(final_model, full_train_loader, criterion, optimizer)
+        _loss = train_one_epoch(final_model, full_train_loader, final_criterion, final_optimizer)
         if _epoch % 50 == 0 or _epoch == 1 or _epoch == epochs:
             print(f"Epoch {_epoch:03} | Full Train Loss: {_loss:.4f}")
 

@@ -15,6 +15,7 @@ dependencies = [
     "pyqt6==6.7.1",
     "scikit-learn>=1.7.2",
     "screeninfo==0.8.1",
+    "seaborn>=0.13.2",
     "setuptools>=80.9.0",
     "torch>=2.8.0",
     "ursina==5.0.0",
