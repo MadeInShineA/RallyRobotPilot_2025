@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import joblib
 import numpy as np
+import json
 from PyQt6 import QtWidgets
 
 from data_collector import DataCollectionUI
@@ -19,19 +20,24 @@ Be warned that this could also cause crash on the client side if socket sending 
 
 
 class DrivingPolicy(nn.Module):
-    def __init__(self, input_dim, hidden_dim=128):
+    def __init__(self, input_dim, hidden_layers, activation="ReLU"):
         super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, 6),  # 2 outputs * 3 classes
-        )
+        layers = []
+        prev_dim = input_dim
+        for hidden_dim in hidden_layers:
+            layers.append(nn.Linear(prev_dim, hidden_dim))
+            if activation == "ReLU":
+                layers.append(nn.ReLU())
+            elif activation == "Tanh":
+                layers.append(nn.Tanh())
+            elif activation == "Sigmoid":
+                layers.append(nn.Sigmoid())
+            prev_dim = hidden_dim
+        layers.append(nn.Linear(prev_dim, 6))  # 2 outputs × 3 classes each
+        self.net = nn.Sequential(*layers)
 
     def forward(self, x):
-        out = self.net(x)
-        return out.view(-1, 2, 3)  # (batch, 2, 3)
+        return self.net(x).view(-1, 2, 3)
 
 
 class ExampleNNMsgProcessor:
@@ -42,8 +48,15 @@ class ExampleNNMsgProcessor:
         # Remove feature names to avoid warning when transforming numpy array
         if hasattr(self.scaler_X, "feature_names_in_"):
             del self.scaler_X.feature_names_in_
+        # Load model config
+        with open("./model/model_config.json", "r") as f:
+            config = json.load(f)
         # Load model
-        self.model = DrivingPolicy(input_dim=16)  # 15 raycasts + 1 speed
+        self.model = DrivingPolicy(
+            input_dim=16,
+            hidden_layers=config["hidden_layers"],
+            activation=config["activation"],
+        )
         self.model.load_state_dict(
             torch.load("./model/driving_policy.pth", map_location=torch.device("cpu"))
         )

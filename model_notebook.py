@@ -78,8 +78,8 @@ def _(lzma, os, pickle, pl):
 
         input_path = os.path.join(record_dir, filename)
         try:
-            with lzma.open(input_path, "rb") as f:
-                snapshots = pickle.load(f)
+            with lzma.open(input_path, "rb") as _f:
+                snapshots = pickle.load(_f)
         except Exception as e:
             print(f"❌ Failed to load {filename}: {e}")
             continue
@@ -133,23 +133,43 @@ def _(df, pl):
 
 
 @app.cell
+def _(df_first_frames_cleaned, pl):
+    ### Also clean the end frames of each record when nothing happens
+    df_frames_cleaned = df_first_frames_cleaned.filter(
+        (
+            (pl.col("forward") != 0)
+            | (pl.col("back") != 0)
+            | (pl.col("left") != 0)
+            | (pl.col("right") != 0)
+        )
+        .reverse()
+        .cum_max()
+        .reverse()
+        .over("record")
+    )
+
+    df_frames_cleaned.tail()
+    return (df_frames_cleaned,)
+
+
+@app.cell
 def _(mo):
     mo.md(r"""### Filter out the short records""")
     return
 
 
 @app.cell
-def _(df_first_frames_cleaned, pl):
-    records_lengths = df_first_frames_cleaned.group_by("record").agg(pl.len())
+def _(df_frames_cleaned, pl):
+    records_lengths = df_frames_cleaned.group_by("record").agg(pl.len())
     records_lengths
     return
 
 
 @app.cell
-def _(df_first_frames_cleaned, pl):
+def _(df_frames_cleaned, pl):
     min_length = 100
 
-    df_lengths_filtered = df_first_frames_cleaned.filter(
+    df_lengths_filtered = df_frames_cleaned.filter(
         pl.len().over("record") >= min_length
     )
     return (df_lengths_filtered,)
@@ -211,7 +231,7 @@ def _(axes, df_lengths_filtered, np, pl, plt):
 
     plt.tight_layout()
     plt.show()
-    return (records,)
+    return
 
 
 @app.cell
@@ -343,10 +363,23 @@ def _(df_lengths_filtered, np, pl, plt):
 
     # Convert raycasts to numpy and plot
     ray_matrix = np.vstack(triggers["raycasts"].to_numpy())
-    plt.imshow(ray_matrix, aspect="auto", cmap="viridis")
-    plt.xlabel("Ray Index")
-    plt.ylabel("Forward-Onset Event")
-    plt.title("Raycast Profile at Start of Acceleration")
+
+    # Create the plot
+    plt.figure(figsize=(10, 6))
+    _im = plt.imshow(ray_matrix, aspect="auto", cmap="viridis")
+
+    # Add colorbar
+    cbar = plt.colorbar(_im)
+    cbar.set_label("Raycast Distance", fontsize=12)
+
+    # Labels & title
+    plt.xlabel("Ray Index", fontsize=12)
+    plt.ylabel("Forward-Onset Event", fontsize=12)
+    plt.title("Raycast Profile at Start of Acceleration", fontsize=13, pad=15)
+
+    # Optional: improve layout
+    plt.tight_layout()
+    plt.show()
     return
 
 
@@ -364,14 +397,11 @@ def _(
     os,
     pl,
     ray_cols,
-    records,
     train_test_split,
 ):
     # --- 1. Split by RECORD first
-    train_recs, test_recs = train_test_split(records, test_size=0.2, random_state=42)
+    df_train, df_test = train_test_split(df_lengths_filtered, test_size=0.2, random_state=42)
 
-    df_train = df_lengths_filtered.filter(pl.col("record").is_in(train_recs))
-    df_test = df_lengths_filtered.filter(pl.col("record").is_in(test_recs))
 
     # --- 2. Prepare feature and label columns
     feature_cols = ray_cols + ["car_speed"]
@@ -423,6 +453,30 @@ def _(y_train):
 
 @app.cell
 def _(mo):
+    mo.md(r"""## Define architectures to test""")
+    return
+
+
+@app.cell
+def _():
+    architectures = [
+        ("1_layer_64_ReLU", [64], "ReLU"),
+        ("1_layer_128_ReLU", [128], "ReLU"),
+        ("1_layer_256_ReLU", [256], "ReLU"),
+
+        ("1_layer_64_Tanh", [64], "Tanh"),
+        ("1_layer_128_Tanh", [128], "Tanh"),
+        ("1_layer_256_Tanh", [256], "Tanh"),
+
+        ("1_layer_64_Sigmoid", [64], "Sigmoid"),
+        ("1_layer_128_Sigmoid", [128], "Sigmoid"),
+        ("1_layer_256_Sigmoid", [256], "Sigmoig"),
+    ]
+    return (architectures,)
+
+
+@app.cell
+def _(mo):
     mo.md(r"""## Building prediction neural network""")
     return
 
@@ -434,6 +488,7 @@ def _(
     TensorDataset,
     X_train_scaled,
     accuracy_score,
+    architectures,
     classification_report,
     f1_score,
     nn,
@@ -444,10 +499,10 @@ def _(
 ):
 
     # --- Hyperparameters ---
-    n_splits = 5
-    epochs = 200
+    n_splits = 2
+    epochs = 50
     batch_size = 256
-    learning_rate = 1e-3
+    learning_rate = 1e-2
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # --- Data Preparation ---
@@ -457,15 +512,21 @@ def _(
 
     # --- Model Definition ---
     class DrivingPolicy(nn.Module):
-        def __init__(self, input_dim, hidden_dim=128):
+        def __init__(self, input_dim, hidden_layers, activation="ReLU"):
             super().__init__()
-            self.net = nn.Sequential(
-                nn.Linear(input_dim, hidden_dim),
-                nn.ReLU(),
-                nn.Linear(hidden_dim, hidden_dim),
-                nn.ReLU(),
-                nn.Linear(hidden_dim, 6),  # 2 outputs × 3 classes each
-            )
+            layers = []
+            prev_dim = input_dim
+            for hidden_dim in hidden_layers:
+                layers.append(nn.Linear(prev_dim, hidden_dim))
+                if activation == "ReLU":
+                    layers.append(nn.ReLU())
+                elif activation == "Tanh":
+                    layers.append(nn.Tanh())
+                elif activation == "Sigmoid":
+                    layers.append(nn.Sigmoid())
+                prev_dim = hidden_dim
+            layers.append(nn.Linear(prev_dim, 6))  # 2 outputs × 3 classes each
+            self.net = nn.Sequential(*layers)
 
         def forward(self, x):
             # Output shape: (batch_size, 2, 3)
@@ -512,9 +573,8 @@ def _(
         print(classification_report(y_true[:, 1], y_pred[:, 1], target_names=["-1", "0", "1"]))
 
     # --- K-Fold Cross Validation ---
-    metrics_per_fold = []
-    all_y_true = []
-    all_y_pred = []
+    metrics_per_arch = {arch_name: [] for arch_name, _, _ in architectures}
+    criterion = nn.CrossEntropyLoss()
 
     kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
 
@@ -531,57 +591,58 @@ def _(
         train_loader = DataLoader(TensorDataset(X_tr, y_tr), batch_size=batch_size, shuffle=True)
         val_loader = DataLoader(TensorDataset(X_val, y_val), batch_size=batch_size)
 
-        # Initialize model, optimizer, loss function
-        model = DrivingPolicy(X_tr.shape[1]).to(device)
-        _optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-        criterion = nn.CrossEntropyLoss()
+        for arch_name, hidden_layers, activation in architectures:
+            print(f"Training {arch_name}...")
+            # Initialize model, optimizer, loss function
+            model = DrivingPolicy(X_tr.shape[1], hidden_layers, activation).to(device)
+            _optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
-        # Track metrics per epoch
-        train_losses = []
-        train_throttle_accs = []
-        train_steer_accs = []
-        val_throttle_accs = []
-        val_steer_accs = []
+            # Track metrics per epoch
+            train_losses = []
+            train_throttle_accs = []
+            train_steer_accs = []
+            val_throttle_accs = []
+            val_steer_accs = []
 
-        for epoch in range(1, epochs + 1):
-            loss = train_one_epoch(model, train_loader, criterion, _optimizer)
-            train_losses.append(loss)
+            for epoch in range(1, epochs + 1):
+                loss = train_one_epoch(model, train_loader, criterion, _optimizer)
+                train_losses.append(loss)
 
-            y_true_train, y_pred_train = evaluate(model, train_loader)
-            train_throttle_acc, train_steer_acc = compute_accuracy(y_true_train, y_pred_train)
-            train_throttle_accs.append(train_throttle_acc)
-            train_steer_accs.append(train_steer_acc)
+                y_true_train, y_pred_train = evaluate(model, train_loader)
+                train_throttle_acc, train_steer_acc = compute_accuracy(y_true_train, y_pred_train)
+                train_throttle_accs.append(train_throttle_acc)
+                train_steer_accs.append(train_steer_acc)
+                train_throttle_f1 = f1_score(y_true_train[:, 0], y_pred_train[:, 0], average="weighted")
+                train_steer_f1 = f1_score(y_true_train[:, 1], y_pred_train[:, 1], average="weighted")
 
-            y_true_val, y_pred_val = evaluate(model, val_loader)
-            val_throttle_acc, val_steer_acc = compute_accuracy(y_true_val, y_pred_val)
-            val_throttle_accs.append(val_throttle_acc)
-            val_steer_accs.append(val_steer_acc)
+                y_true_val, y_pred_val = evaluate(model, val_loader)
+                val_throttle_acc, val_steer_acc = compute_accuracy(y_true_val, y_pred_val)
+                val_throttle_accs.append(val_throttle_acc)
+                val_steer_accs.append(val_steer_acc)
+                val_throttle_f1 = f1_score(y_true_val[:, 0], y_pred_val[:, 0], average="weighted")
+                val_steer_f1 = f1_score(y_true_val[:, 1], y_pred_val[:, 1], average="weighted")
 
-            if epoch == epochs:
-                all_y_true.append(y_true_val)
-                all_y_pred.append(y_pred_val)
+                print(f"Epoch {epoch:03} | Loss: {loss:.4f} | "
+                      f"Train Throttle F1 weighted: {train_throttle_f1:.3f} | Train Steer F1 weighted: {train_steer_f1:.3f} | "
+                      f"Val Throttle F1 weighted: {val_throttle_f1:.3f} | Val Steer F1 weighted: {val_steer_f1:.3f}")
 
-            print(f"Epoch {epoch:03} | Loss: {loss:.4f} | "
-                  f"Train Throttle Acc: {train_throttle_acc:.3f} | Train Steer Acc: {train_steer_acc:.3f} | "
-                  f"Val Throttle Acc: {val_throttle_acc:.3f} | Val Steer Acc: {val_steer_acc:.3f}")
+                if epoch == epochs:
+                    # Final metrics and report
+                    throttle_f1 = f1_score(y_true_val[:, 0], y_pred_val[:, 0], average="weighted")
+                    steer_f1 = f1_score(y_true_val[:, 1], y_pred_val[:, 1], average="weighted")
+                    print_classification_reports(y_true_val, y_pred_val)
 
-        # Final metrics and report
-        throttle_f1 = f1_score(y_true_val[:, 0], y_pred_val[:, 0], average="macro")
-        steer_f1 = f1_score(y_true_val[:, 1], y_pred_val[:, 1], average="macro")
-
-        print_classification_reports(y_true_val, y_pred_val)
-
-        metrics_per_fold.append({
-            "train_loss": train_losses,
-            "train_throttle_acc": train_throttle_accs,
-            "train_steer_acc": train_steer_accs,
-            "val_throttle_acc": val_throttle_accs,
-            "val_steer_acc": val_steer_accs,
-            "final_throttle_acc": val_throttle_accs[-1],
-            "final_steer_acc": val_steer_accs[-1],
-            "throttle_f1": throttle_f1,
-            "steer_f1": steer_f1
-        })
+                    metrics_per_arch[arch_name].append({
+                        "train_loss": train_losses,
+                        "train_throttle_acc": train_throttle_accs,
+                        "train_steer_acc": train_steer_accs,
+                        "val_throttle_acc": val_throttle_accs,
+                        "val_steer_acc": val_steer_accs,
+                        "final_throttle_acc": val_throttle_accs[-1],
+                        "final_steer_acc": val_steer_accs[-1],
+                        "throttle_f1": throttle_f1,
+                        "steer_f1": steer_f1
+                    })
     return (
         DrivingPolicy,
         X_train_np,
@@ -590,17 +651,94 @@ def _(
         device,
         epochs,
         learning_rate,
-        loss,
-        metrics_per_fold,
+        metrics_per_arch,
         train_one_epoch,
         y_train_np,
     )
 
 
 @app.cell
-def _(epochs, metrics_per_fold, np, plt):
-    # --- 📊 Per-Fold Combined Plots ---
-    for _fold, metrics in enumerate(metrics_per_fold):
+def _(architectures, metrics_per_arch, plt):
+
+    # --- Summary Plots Across Architectures ---
+    arch_names = [arch_name for arch_name, _, _ in architectures]
+    throttle_accuracies = [[m["final_throttle_acc"] for m in metrics_per_arch[arch_name]] for arch_name in arch_names]
+    steer_accuracies = [[m["final_steer_acc"] for m in metrics_per_arch[arch_name]] for arch_name in arch_names]
+    throttle_f1s = [[m["throttle_f1"] for m in metrics_per_arch[arch_name]] for arch_name in arch_names]
+    steer_f1s = [[m["steer_f1"] for m in metrics_per_arch[arch_name]] for arch_name in arch_names]
+
+    # Combine data
+    acc_data = throttle_accuracies + steer_accuracies
+    f1_data = throttle_f1s + steer_f1s
+
+    # Create labels: e.g., ["Arch1 (Throttle)", "Arch2 (Throttle)", ..., "Arch1 (Steer)", ...]
+    labels = [f"{name} (Throttle)" for name in arch_names] + [f"{name} (Steer)" for name in arch_names]
+
+    # Colors: first half = throttle (e.g., skyblue), second half = steer (e.g., lightcoral)
+    colors = ['skyblue'] * len(arch_names) + ['lightcoral'] * len(arch_names)
+
+    plt.figure(figsize=(16, 5))
+
+    # --- Accuracy subplot ---
+    plt.subplot(1, 2, 1)
+    bp1 = plt.boxplot(acc_data, patch_artist=True, tick_labels=labels)
+    for patch, color in zip(bp1['boxes'], colors):
+        patch.set_facecolor(color)
+    plt.title("Final Accuracy per Architecture (Throttle + Steer)")
+    plt.ylabel("Accuracy")
+    plt.xticks(rotation=45, ha='right')
+
+    # --- F1 subplot ---
+    plt.subplot(1, 2, 2)
+    bp2 = plt.boxplot(f1_data, patch_artist=True, tick_labels=labels)
+    for patch, color in zip(bp2['boxes'], colors):
+        patch.set_facecolor(color)
+    plt.title("Final F1 Score per Architecture (Throttle + Steer)")
+    plt.ylabel("F1 Score")
+    plt.xticks(rotation=45, ha='right')
+
+    # Add a shared legend
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor='skyblue', label='Throttle'),
+        Patch(facecolor='lightcoral', label='Steer')
+    ]
+    plt.figlegend(handles=legend_elements, loc='upper center', ncol=2, bbox_to_anchor=(0.5, 0.96))
+
+    plt.tight_layout(rect=[0, 0, 1, 0.92])  # make room for legend
+    plt.show()
+    return
+
+
+@app.cell
+def _(architectures, metrics_per_arch, np):
+    # Select the best architecture based on average validation weighted F1 score
+    arch_scores = {}
+    for _arch_name, metrics_list in metrics_per_arch.items():
+        avg_throttle_f1 = np.mean([m["throttle_f1"] for m in metrics_list])
+        avg_steer_f1 = np.mean([m["steer_f1"] for m in metrics_list])
+        avg_f1 = (avg_throttle_f1 + avg_steer_f1) / 2
+        arch_scores[_arch_name] = avg_f1
+
+    best_arch_name = max(arch_scores, key=lambda k: arch_scores[k])
+    best_hidden_layers, best_activation = next((hidden_layers, activation) for name, hidden_layers, activation in architectures if name == best_arch_name)
+
+    print(f"Best architecture: {best_arch_name} with average validation weighted F1: {arch_scores[best_arch_name]:.4f}")
+
+    # Save model config
+    import json
+    config = {"hidden_layers": best_hidden_layers, "activation": best_activation}
+    with open("./model/model_config.json", "w") as _f:
+        json.dump(config, _f)
+    print("Model config saved to ./model/model_config.json")
+    return best_activation, best_arch_name, best_hidden_layers
+
+
+@app.cell
+def _(best_arch_name, epochs, metrics_per_arch, np, plt):
+    # --- 📊 Per-Fold Plots for Best Architecture ---
+    best_metrics_list = metrics_per_arch[best_arch_name]
+    for _fold, metrics in enumerate(best_metrics_list):
         epochs_range = np.arange(1, epochs + 1)
 
         # Compute errors (1 - accuracy)
@@ -610,7 +748,7 @@ def _(epochs, metrics_per_fold, np, plt):
         val_steer_error = 1 - np.array(metrics["val_steer_acc"])
 
         plt.figure(figsize=(18, 5))
-        plt.suptitle(f"Fold {_fold + 1} Training Metrics")
+        plt.suptitle(f"Best Arch {best_arch_name} - Fold {_fold + 1} Training Metrics")
 
         # --- Plot 1: Train Loss ---
         plt.subplot(1, 3, 1)
@@ -646,42 +784,18 @@ def _(epochs, metrics_per_fold, np, plt):
 
 
 @app.cell
-def _(metrics_per_fold, plt):
-    # --- Summary Plots Across Folds ---
-    throttle_accuracies = [m["final_throttle_acc"] for m in metrics_per_fold]
-    steer_accuracies = [m["final_steer_acc"] for m in metrics_per_fold]
-    throttle_f1s = [m["throttle_f1"] for m in metrics_per_fold]
-    steer_f1s = [m["steer_f1"] for m in metrics_per_fold]
-
-    plt.figure(figsize=(12, 5))
-
-    plt.subplot(1, 2, 1)
-    plt.boxplot([throttle_accuracies, steer_accuracies], tick_labels=["Throttle", "Steer"])
-    plt.title("Final Accuracy per Fold")
-    plt.ylabel("Accuracy")
-
-    plt.subplot(1, 2, 2)
-    plt.boxplot([throttle_f1s, steer_f1s], tick_labels=["Throttle", "Steer"])
-    plt.title("Final F1 Score per Fold")
-    plt.ylabel("F1 Score")
-
-    plt.tight_layout()
-    plt.show()
-    return
-
-
-@app.cell
 def _(
     DataLoader,
     DrivingPolicy,
     TensorDataset,
     X_train_np,
     batch_size,
+    best_activation,
+    best_hidden_layers,
     criterion,
     device,
     epochs,
     learning_rate,
-    loss,
     optim,
     torch,
     train_one_epoch,
@@ -693,18 +807,17 @@ def _(
     y_full = torch.tensor(y_train_np, dtype=torch.long)
     full_train_loader = DataLoader(TensorDataset(X_full, y_full), batch_size=batch_size, shuffle=True)
 
-    final_model = DrivingPolicy(X_full.shape[1]).to(device)
+    final_model = DrivingPolicy(X_full.shape[1], best_hidden_layers, best_activation).to(device)
     optimizer = optim.Adam(final_model.parameters(), lr=learning_rate)
 
     for _epoch in range(1, epochs + 1):
         _loss = train_one_epoch(final_model, full_train_loader, criterion, optimizer)
         if _epoch % 50 == 0 or _epoch == 1 or _epoch == epochs:
-            print(f"Epoch {_epoch:03} | Full Train Loss: {loss:.4f}")
+            print(f"Epoch {_epoch:03} | Full Train Loss: {_loss:.4f}")
 
     # --- Save Final Model ---
     torch.save(final_model.state_dict(), "./model/driving_policy.pth")
     print("✅ Final model trained on all data saved to './model/driving_policy_model.pth'")
-
     return (final_model,)
 
 
@@ -751,14 +864,14 @@ def _(
     test_throttle_acc = accuracy_score(y_true_test[:, 0], y_pred_test[:, 0])
     test_steer_acc = accuracy_score(y_true_test[:, 1], y_pred_test[:, 1])
 
-    test_throttle_f1 = f1_score(y_true_test[:, 0], y_pred_test[:, 0], average="macro")
-    test_steer_f1 = f1_score(y_true_test[:, 1], y_pred_test[:, 1], average="macro")
+    test_throttle_f1 = f1_score(y_true_test[:, 0], y_pred_test[:, 0], average="weighted")
+    test_steer_f1 = f1_score(y_true_test[:, 1], y_pred_test[:, 1], average="weighted")
 
     print("\nFinal Test Set Performance:")
     print(f"Throttle Accuracy: {test_throttle_acc:.4f}")
     print(f"Steer Accuracy: {test_steer_acc:.4f}")
-    print(f"Throttle F1 Score: {test_throttle_f1:.4f}")
-    print(f"Steer F1 Score: {test_steer_f1:.4f}")
+    print(f"Throttle F1 Score weighted: {test_throttle_f1:.4f}")
+    print(f"Steer F1 Score weighted: {test_steer_f1:.4f}")
 
     print("\nThrottle Classification Report:")
     print(classification_report(y_true_test[:, 0], y_pred_test[:, 0], target_names=["-1", "0", "1"]))
