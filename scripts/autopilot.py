@@ -3,6 +3,7 @@ import torch.nn as nn
 import joblib
 import numpy as np
 import json
+import os
 from PyQt6 import QtWidgets
 
 from data_collector import DataCollectionUI
@@ -33,32 +34,33 @@ class DrivingPolicy(nn.Module):
             elif activation == "Sigmoid":
                 layers.append(nn.Sigmoid())
             prev_dim = hidden_dim
-        layers.append(nn.Linear(prev_dim, 6))  # 2 outputs × 3 classes each
+        layers.append(nn.Linear(prev_dim, 4))  # 4 binary outputs
         self.net = nn.Sequential(*layers)
 
     def forward(self, x):
-        return self.net(x).view(-1, 2, 3)
+        return self.net(x)
 
 
 class ExampleNNMsgProcessor:
     def __init__(self):
         self.always_forward = False
+        model_dir = os.path.join(os.path.dirname(__file__), "../model")
         # Load scaler
-        self.scaler_X = joblib.load("./model/scaler_X.joblib")
+        self.scaler_X = joblib.load(os.path.join(model_dir, "scaler_X.joblib"))
         # Remove feature names to avoid warning when transforming numpy array
         if hasattr(self.scaler_X, "feature_names_in_"):
             del self.scaler_X.feature_names_in_
         # Load model config
-        with open("./model/model_config.json", "r") as f:
+        with open(os.path.join(model_dir, "model_config.json"), "r") as f:
             config = json.load(f)
         # Load model
         self.model = DrivingPolicy(
-            input_dim=16,
+            input_dim=config["input_dim"],
             hidden_layers=config["hidden_layers"],
             activation=config["activation"],
         )
         self.model.load_state_dict(
-            torch.load("./model/driving_policy.pth", map_location=torch.device("cpu"))
+            torch.load(os.path.join(model_dir, "driving_policy.pth"), map_location=torch.device("cpu"))
         )
         self.model.eval()
 
@@ -72,24 +74,19 @@ class ExampleNNMsgProcessor:
 
         # Inference
         with torch.no_grad():
-            logits = self.model(x)  # (1, 2, 3)
-            preds = torch.argmax(logits, dim=2).squeeze(0).numpy()  # (2,)
+            logits = self.model(x)  # (1, 4)
+            preds = (torch.sigmoid(logits) > 0.5).squeeze(0).numpy().astype(int)  # (4,)
 
-        # Convert classes: 0 -> -1, 1 -> 0, 2 -> 1
-        throttle_class = preds[0] - 1
-        steer_class = preds[1] - 1
-
+        # preds: [forward, back, left, right]
         commands = []
-        # Throttle
-        if throttle_class == 1:
+        if preds[0]:  # forward
             commands.append(("forward", True))
-        elif throttle_class == -1:
+        if preds[1]:  # back
             commands.append(("back", True))
-        # Steer
-        if steer_class == 1:
-            commands.append(("right", True))
-        elif steer_class == -1:
+        if preds[2]:  # left
             commands.append(("left", True))
+        if preds[3]:  # right
+            commands.append(("right", True))
 
         print(f"Returning command {commands}")
         return commands
