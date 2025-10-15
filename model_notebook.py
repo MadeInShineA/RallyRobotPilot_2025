@@ -135,7 +135,7 @@ def _(df, pl):
 @app.cell
 def _(df_first_frames_cleaned, pl):
     ### Also clean the end frames of each record when nothing happens
-    df_frames_cleaned = df_first_frames_cleaned.filter(
+    df_last_frames_cleaned = df_first_frames_cleaned.filter(
         (
             (pl.col("forward") != 0)
             | (pl.col("back") != 0)
@@ -148,8 +148,74 @@ def _(df_first_frames_cleaned, pl):
         .over("record")
     )
 
-    df_frames_cleaned.tail()
-    return (df_frames_cleaned,)
+    df_last_frames_cleaned.tail()
+    return (df_last_frames_cleaned,)
+
+
+@app.cell
+def _(df_first_frames_cleaned, pl):
+    df_with_no_input = df_first_frames_cleaned.with_columns(
+        no_input=(
+            (pl.col("forward") == 0) &
+            (pl.col("back") == 0) &
+            (pl.col("left") == 0) &
+            (pl.col("right") == 0)
+        ).cast(pl.Int8)  # 1 = no input, 0 = some input
+    )
+
+
+
+    no_input_per_record = (
+        df_with_no_input
+        .group_by("record")
+        .agg(
+            pl.col("no_input").mean().alias("no_input_fraction"),
+            pl.col("no_input").sum().alias("no_input_count"),
+            pl.len().alias("total_frames")
+        )
+        .sort("no_input_fraction", descending=True)
+    )
+
+
+    no_input_per_record
+    return (no_input_per_record,)
+
+
+@app.cell
+def _(no_input_per_record, plt):
+    # Extract data
+    records = no_input_per_record["record"].to_list()
+    fractions = no_input_per_record["no_input_fraction"].to_numpy()
+
+    # Plot
+    _fig, _ax = plt.subplots(figsize=(10, max(6, 0.3 * len(records))))
+    _bars = _ax.barh(records, fractions, color="lightcoral")
+
+    # Labels
+    _ax.set_xlabel("Fraction of Time with No Input")
+    _ax.set_ylabel("Replay (record)")
+    _ax.set_title("No-Input Usage per Replay")
+    _ax.set_xlim(0, 1)
+
+    # Optional: add percentage labels
+    for _i, _frac in enumerate(fractions):
+        _ax.text(_frac + 0.01, _i, f"{_frac:.1%}", va='center', fontsize=9)
+
+    _ax.invert_yaxis()  # Longest on top
+    plt.tight_layout()
+    plt.show()
+    return
+
+
+@app.cell
+def _(df_last_frames_cleaned, pl):
+    df_with_input_only = df_last_frames_cleaned.filter(
+        (pl.col("forward") != 0) |
+        (pl.col("back") != 0) |
+        (pl.col("left") != 0) |
+        (pl.col("right") != 0)
+    )
+    return
 
 
 @app.cell
@@ -159,20 +225,28 @@ def _(mo):
 
 
 @app.cell
-def _(df_frames_cleaned, pl):
-    records_lengths = df_frames_cleaned.group_by("record").agg(pl.len())
+def _(df_last_frames_cleaned, pl):
+    records_lengths = df_last_frames_cleaned.group_by("record").agg(pl.len())
     records_lengths
     return
 
 
 @app.cell
-def _(df_frames_cleaned, pl):
+def _(df_last_frames_cleaned, pl):
     min_length = 100
 
-    df_lengths_filtered = df_frames_cleaned.filter(
+    df_lengths_filtered = df_last_frames_cleaned.filter(
         pl.len().over("record") >= min_length
     )
     return (df_lengths_filtered,)
+
+
+@app.cell
+def _(df_lengths_filtered):
+    cleaned_records = df_lengths_filtered["record"].unique()
+
+    cleaned_records
+    return (cleaned_records,)
 
 
 @app.cell
@@ -182,11 +256,9 @@ def _(mo):
 
 
 @app.cell
-def _(axes, df_lengths_filtered, np, pl, plt):
+def _(axes, cleaned_records, df_lengths_filtered, np, pl, plt):
     # Get unique filenames
-    records = df_lengths_filtered["record"].unique().to_list()
-
-    n_files = len(records)
+    n_files = len(cleaned_records)
     cols = 2
     rows = (n_files + cols - 1) // cols  # ceil division
 
@@ -195,7 +267,7 @@ def _(axes, df_lengths_filtered, np, pl, plt):
     )
     _axes = _axes.flatten() if n_files > 1 else [axes]
 
-    for idx, fname in enumerate(records):
+    for idx, fname in enumerate(cleaned_records):
         _ax = _axes[idx]
         subset = df_lengths_filtered.filter(pl.col("record") == fname).sort("frame_idx")
         frames = subset["frame_idx"].to_numpy()
@@ -236,49 +308,67 @@ def _(axes, df_lengths_filtered, np, pl, plt):
 
 @app.cell
 def _(df_lengths_filtered, np, pl, plt):
-    # Compute usage per file: mean of each control (assuming 0/1 or [0,1] signals)
+    # Compute usage per file: include "no throttle" and "no steer"
     usage_df = (
-        df_lengths_filtered.group_by("record")
+        df_lengths_filtered
+        .with_columns(
+            # Define "throttle active" as forward OR back (sum if non-overlapping)
+            (pl.col("forward") + pl.col("back")).alias("throttle_active"),
+            (pl.col("left") + pl.col("right")).alias("steer_active"),
+        )
+        .with_columns(
+            # "No throttle" = 1 - throttle_active
+            # "No steer" = 1 - steer_active
+            (1 - pl.col("throttle_active")).alias("no_throttle"),
+            (1 - pl.col("steer_active")).alias("no_steer"),
+        )
+        .group_by("record")
         .agg(
             pl.col("forward").mean().alias("forward_usage"),
             pl.col("back").mean().alias("back_usage"),
             pl.col("left").mean().alias("left_usage"),
             pl.col("right").mean().alias("right_usage"),
+            pl.col("no_throttle").mean().alias("no_throttle_usage"),
+            pl.col("no_steer").mean().alias("no_steer_usage"),
         )
         .sort("record")
     )
 
-    # Prepare data for heatmap
-    control_cols = ["forward_usage", "back_usage", "left_usage", "right_usage"]
-    usage_matrix = usage_df.select(control_cols).to_numpy()  # shape: (n_files, 4)
+    # Prepare data for heatmap — now 6 columns
+    control_cols = [
+        "forward_usage", "back_usage",
+        "left_usage", "right_usage",
+        "no_throttle_usage", "no_steer_usage"
+    ]
+    usage_matrix = usage_df.select(control_cols).to_numpy()
     records_sorted = usage_df["record"].to_list()
 
     # Plot heatmap
-    fig, ax = plt.subplots(figsize=(8, max(4, 0.5 * len(records_sorted))))
+    fig, ax = plt.subplots(figsize=(10, max(4, 0.5 * len(records_sorted))))
     im = ax.imshow(usage_matrix, cmap="Blues", aspect="auto")
 
     # Set ticks
     ax.set_yticks(np.arange(len(records_sorted)))
     ax.set_yticklabels(records_sorted)
-    ax.set_xticks(np.arange(4))
-    ax.set_xticklabels(["Forward", "Back", "Left", "Right"])
+    ax.set_xticks(np.arange(len(control_cols)))
+    ax.set_xticklabels([
+        "Forward", "Back", "Left", "Right", "No Throttle", "No Steer"
+    ], rotation=45, ha="right")
 
     # Add colorbar
     plt.colorbar(im, ax=ax, label="Fraction of time active")
 
-    # Add text annotations (optional)
+    # Add text annotations
     for _i in range(len(records_sorted)):
-        for _j in range(4):
+        for _j in range(len(control_cols)):
+            _val = usage_matrix[_i, _j]
             text = ax.text(
-                _j,
-                _i,
-                f"{usage_matrix[_i, _j]:.2f}",
-                ha="center",
-                va="center",
-                color="black" if usage_matrix[_i, _j] < 0.5 else "white",
+                _j, _i, f"{_val:.2f}",
+                ha="center", va="center",
+                color="black" if _val < 0.5 else "white",
             )
 
-    ax.set_title("Control Usage per Record")
+    ax.set_title("Control Usage per Record (including idle states)")
     plt.tight_layout()
     plt.show()
     return
