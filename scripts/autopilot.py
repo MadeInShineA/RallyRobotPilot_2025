@@ -34,11 +34,13 @@ class DrivingPolicy(nn.Module):
                 layers.append(nn.Sigmoid())
             layers.append(nn.Dropout(dropout_rate))
             prev_dim = hidden_dim
-        layers.append(nn.Linear(prev_dim, 6))  # 2 outputs × 3 classes each
+        layers.append(
+            nn.Linear(prev_dim, 4)
+        )  # 4 binary outputs: forward, back, left, right
         self.net = nn.Sequential(*layers)
 
     def forward(self, x):
-        return self.net(x).view(-1, 2, 3)
+        return self.net(x)
 
 
 class ExampleNNMsgProcessor:
@@ -75,24 +77,21 @@ class ExampleNNMsgProcessor:
 
         # Inference
         with torch.no_grad():
-            logits = self.model(x)  # (1, 2, 3)
-            preds = torch.argmax(logits, dim=2).squeeze(0).numpy()  # (2,)
-
-        # Convert classes: 0 -> -1, 1 -> 0, 2 -> 1
-        throttle_class = preds[0] - 1
-        steer_class = preds[1] - 1
+            logits = self.model(x)  # (1, 4)
+            probs = torch.sigmoid(logits)
+            print(f"Probs: {probs.squeeze(0).numpy()}")
+            preds = (probs > 0.5).squeeze(0).numpy()  # (4,)
 
         commands = []
-        # Throttle
-        if throttle_class == 1:
+        # Binary predictions for each key
+        if preds[0]:  # forward
             commands.append(("forward", True))
-        elif throttle_class == -1:
+        if preds[1]:  # back
             commands.append(("back", True))
-        # Steer
-        if steer_class == 1:
-            commands.append(("right", True))
-        elif steer_class == -1:
+        if preds[2]:  # left
             commands.append(("left", True))
+        if preds[3]:  # right
+            commands.append(("right", True))
 
         print(f"Returning command {commands}")
         return commands
