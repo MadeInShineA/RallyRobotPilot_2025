@@ -20,7 +20,7 @@ Be warned that this could also cause crash on the client side if socket sending 
 
 
 class DrivingPolicy(nn.Module):
-    def __init__(self, input_dim, hidden_layers, activation="ReLU"):
+    def __init__(self, input_dim, hidden_layers, activation="ReLU", dropout_rate=0.3):
         super().__init__()
         layers = []
         prev_dim = input_dim
@@ -32,6 +32,7 @@ class DrivingPolicy(nn.Module):
                 layers.append(nn.Tanh())
             elif activation == "Sigmoid":
                 layers.append(nn.Sigmoid())
+            layers.append(nn.Dropout(dropout_rate))
             prev_dim = hidden_dim
         layers.append(nn.Linear(prev_dim, 6))  # 2 outputs × 3 classes each
         self.net = nn.Sequential(*layers)
@@ -56,6 +57,7 @@ class ExampleNNMsgProcessor:
             input_dim=16,
             hidden_layers=config["hidden_layers"],
             activation=config["activation"],
+            dropout_rate=config["dropout_rate"],
         )
         self.model.load_state_dict(
             torch.load("./model/driving_policy.pth", map_location=torch.device("cpu"))
@@ -63,6 +65,7 @@ class ExampleNNMsgProcessor:
         self.model.eval()
 
     def nn_infer(self, message):
+        print(f"Message: {message}")
         # Extract features: raycasts + car_speed
         features = list(message.raycast_distances) + [message.car_speed]
         features_scaled = self.scaler_X.transform([features])
