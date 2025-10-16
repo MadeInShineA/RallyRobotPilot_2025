@@ -70,7 +70,7 @@ def _(mo):
 
 @app.cell
 def _(lzma, os, pickle, pl):
-    record_dir = "./records/"
+    record_dir = "./simon/"
 
     all_records = []  # Accumulate all records here
 
@@ -545,6 +545,7 @@ def _(
     epochs = 20
     batch_size = 50
     learning_rate = 1e-3
+    dropout_rate = 0.2
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     criterion = nn.BCEWithLogitsLoss()
@@ -555,7 +556,7 @@ def _(
 
     # --- Model Definition ---
     class DrivingPolicy(nn.Module):
-        def __init__(self, input_dim, hidden_layers, activation="ReLU"):
+        def __init__(self, input_dim, hidden_layers, dropout_rate=0.3, activation="ReLU"):
             super().__init__()
             layers = []
             prev_dim = input_dim
@@ -567,8 +568,10 @@ def _(
                     layers.append(nn.Tanh())
                 elif activation == "Sigmoid":
                     layers.append(nn.Sigmoid())
+                # Add dropout after activation
+                layers.append(nn.Dropout(dropout_rate))
                 prev_dim = hidden_dim
-            layers.append(nn.Linear(prev_dim, 4))  # 4 binary outputs
+            layers.append(nn.Linear(prev_dim, 4))  # 4 outputs × 2 classes each
             self.net = nn.Sequential(*layers)
 
         def forward(self, x):
@@ -642,7 +645,7 @@ def _(
         for arch_name, hidden_layers, activation in architectures:
             print(f"Training {arch_name}...")
             # Initialize model, optimizer, loss function
-            model = DrivingPolicy(X_tr.shape[1], hidden_layers, activation).to(device)
+            model = DrivingPolicy(X_tr.shape[1], hidden_layers, dropout_rate, activation).to(device)
             _optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
             # Track metrics per epoch
@@ -718,6 +721,7 @@ def _(
         X_train_np,
         batch_size,
         device,
+        dropout_rate,
         epochs,
         learning_rate,
         metrics_per_arch,
@@ -787,7 +791,7 @@ def _(architectures, metrics_per_arch, plt):
 
 
 @app.cell
-def _(architectures, metrics_per_arch, np):
+def _(X_train_scaled, architectures, dropout_rate, metrics_per_arch, np):
     # Select the best architecture based on average validation F1 score
     arch_scores = {}
     for _arch_name, metrics_list in metrics_per_arch.items():
@@ -805,7 +809,7 @@ def _(architectures, metrics_per_arch, np):
 
     # Save model config
     import json
-    config = {"input_dim": X_train_scaled.shape[1], "hidden_layers": best_hidden_layers, "activation": best_activation}
+    config = {"input_dim": X_train_scaled.shape[1], "hidden_layers": best_hidden_layers, "dropout_rate": dropout_rate, "activation": best_activation}
     with open("./model/model_config.json", "w") as _f:
         json.dump(config, _f)
     print("Model config saved to ./model/model_config.json")
@@ -895,6 +899,7 @@ def _(
     best_activation,
     best_hidden_layers,
     device,
+    dropout_rate,
     epochs,
     learning_rate,
     nn,
@@ -909,7 +914,7 @@ def _(
     y_full = torch.tensor(y_train_np, dtype=torch.float32)
     full_train_loader = DataLoader(TensorDataset(X_full, y_full), batch_size=batch_size, shuffle=True)
 
-    final_model = DrivingPolicy(X_full.shape[1], best_hidden_layers, best_activation).to(device)
+    final_model = DrivingPolicy(X_full.shape[1], best_hidden_layers, dropout_rate, best_activation).to(device)
     final_criterion = nn.BCEWithLogitsLoss()
     final_optimizer = optim.Adam(final_model.parameters(), lr=learning_rate)
 
