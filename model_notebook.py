@@ -472,23 +472,10 @@ def _(
     X_test_scaled = pl.DataFrame(X_test_scaled, schema=feature_cols)
 
     # --- 5. Encode labels as Polars DataFrames (throttle, steer)
-    y_train = df_train.select(pl.col(
-        [
-            'forward',
-            'back',
-            'left',
-            'right'
-        ])
-    )
+    y_train = df_train.select("forward", "back", "left", "right")
 
-    y_test = df_test.select(pl.col(
-        [
-            'forward',
-            'back',
-            'left',
-            'right'
-        ])
-    )
+    y_test = df_test.select("forward", "back", "left", "right")
+
     os.makedirs("model", exist_ok=True)
     joblib.dump(scaler_X, "model/scaler_X.joblib")
     return X_test_scaled, X_train_scaled, y_test, y_train
