@@ -535,7 +535,7 @@ def _(
     # --- Hyperparameters ---
     n_splits = 2
     epochs = 200
-    batch_size = 256
+    batch_size = 100
     learning_rate = 1e-3
     dropout_rate = 0.25
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
