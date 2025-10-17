@@ -42,7 +42,7 @@ class DrivingPolicy(nn.Module):
         return self.net(x)
 
 
-class ExampleNNMsgProcessor:
+class AutoPilotNNMsgProcessor:
     def __init__(self, frame_interval=3, speed_threshold=10.0):
         self.frame_interval = (
             frame_interval  # how many frames between forced forward presses
@@ -120,7 +120,7 @@ if __name__ == "__main__":
 
     app = QtWidgets.QApplication(sys.argv)
 
-    nn_brain = ExampleNNMsgProcessor()
+    nn_brain = AutoPilotNNMsgProcessor()
     data_window = DataCollectionUI(nn_brain.process_message)
     data_window.show()
 
