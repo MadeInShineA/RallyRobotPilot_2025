@@ -70,7 +70,7 @@ def _(mo):
 
 @app.cell
 def _(lzma, os, pickle, pl):
-    record_dir = "./simon/"
+    record_dir = "./simon2/"
 
     all_records = []  # Accumulate all records here
     df = None  # Initialize df
@@ -119,26 +119,7 @@ def _(mo):
 
 @app.cell
 def _(df, pl):
-    # Here de filter the cols
-    df_first_frames_cleaned = df_filtered = df.filter(
-        (
-            (pl.col("forward") != 0)
-            | (pl.col("back") != 0)
-            | (pl.col("left") != 0)
-            | (pl.col("right") != 0)
-        )
-        .cum_max()
-        .over("record")
-    )
-
-    df_first_frames_cleaned.head()
-    return (df_first_frames_cleaned,)
-
-
-@app.cell
-def _(df_first_frames_cleaned, pl):
-    ### Also clean the end frames of each record when nothing happens
-    df_last_frames_cleaned = df_first_frames_cleaned.filter(
+    df_last_frames_cleaned = df.filter(
         (
             (pl.col("forward") != 0)
             | (pl.col("back") != 0)
@@ -153,6 +134,23 @@ def _(df_first_frames_cleaned, pl):
 
     df_last_frames_cleaned.tail()
     return (df_last_frames_cleaned,)
+
+
+@app.cell
+def _(df_last_frames_cleaned, pl):
+    df_first_frames_cleaned = df_last_frames_cleaned.filter(
+        (
+            (pl.col("forward") != 0)
+            | (pl.col("back") != 0)
+            | (pl.col("left") != 0)
+            | (pl.col("right") != 0)
+        )
+        .cum_max()
+        .over("record")
+    )
+
+    df_first_frames_cleaned.head()
+    return (df_first_frames_cleaned,)
 
 
 @app.cell
@@ -219,8 +217,8 @@ def _(mo):
 
 
 @app.cell
-def _(df_last_frames_cleaned, pl):
-    records_lengths = df_last_frames_cleaned.group_by("record").agg(pl.len())
+def _(df_first_frames_cleaned, pl):
+    records_lengths = df_first_frames_cleaned.group_by("record").agg(pl.len())
     records_lengths
     return (records_lengths,)
 
@@ -232,10 +230,10 @@ def _(records_lengths):
 
 
 @app.cell
-def _(df_last_frames_cleaned, pl):
+def _(df_first_frames_cleaned, pl):
     min_length = 100
 
-    df_lengths_filtered = df_last_frames_cleaned.filter(
+    df_lengths_filtered = df_first_frames_cleaned.filter(
         pl.len().over("record") >= min_length
     )
     return (df_lengths_filtered,)
@@ -318,6 +316,8 @@ def _(df_lengths_filtered, np, pl, plt):
     ]
     usage_matrix = usage_df.select(control_cols).to_numpy()
     records_sorted = usage_df["record"].to_list()
+
+    print(usage_matrix)
 
     # Plot heatmap
     fig, _ax = plt.subplots(figsize=(10, max(4, 0.5 * len(records_sorted))))
@@ -455,6 +455,12 @@ def _(df_lengths_filtered, np, pl, plt):
 
 
 @app.cell
+def _(df_lengths_filtered, pl):
+    df_lengths_filtered.filter(pl.col("car_speed") <= 0).select("car_speed")
+    return
+
+
+@app.cell
 def _(mo):
     mo.md(r"""## Data separation (test, train) and preparation (scalling)""")
     return
@@ -526,12 +532,8 @@ def _(mo):
 @app.cell
 def _():
     architectures = [
-        ("1_layer_16_ReLU", [16], "ReLU"),
-        ("1_layer_32_ReLU", [32], "ReLU"),
-        ("1_layer_128_ReLU", [128], "ReLU"),
-        ("2_layer_16_8_ReLU", [16, 8], "ReLU"),
-        ("2_layer_32_8_ReLU", [32, 8], "ReLU"),
         ("2_layer_32_16_ReLU", [32, 16], "ReLU"),
+        ("3_layer_32_32_32_ReLU", [32, 64, 32], "ReLU"),
     ]
     return (architectures,)
 
@@ -560,10 +562,9 @@ def _(
     # --- Hyperparameters ---
     n_splits = 2
     epochs = 100
-    batch_size = 256
-    learning_rate = 1e-3
-    momentum = 0.2
-    dropout_rate = 0.1
+    batch_size = 125
+    learning_rate = 1e-2
+    dropout_rate = 0.3
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     criterion = nn.BCEWithLogitsLoss()
@@ -573,8 +574,8 @@ def _(
     y_train_np = y_train.to_numpy()  # Already 0/1 binary
 
     # Predict 2 steps ahead: y[t+2] is the target for X[t]
-    X_train_shifted = X_train_np  # Remove last 2 rows
-    y_train_shifted = y_train_np  # Remove first 2 labels
+    X_train_shifted = X_train_np  # Drop the last 4 rows
+    y_train_shifted = y_train_np # Drop the first 4 labels
 
     # --- Model Definition ---
     class DrivingPolicy(nn.Module):
@@ -675,9 +676,7 @@ def _(
             model = DrivingPolicy(
                 X_tr.shape[1], hidden_layers, dropout_rate, activation
             ).to(device)
-            _optimizer = optim.SGD(
-                model.parameters(), lr=learning_rate, momentum=momentum
-            )
+            _optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
             # Track metrics per epoch
             train_losses = []
@@ -804,16 +803,13 @@ def _(architectures, metrics_per_arch, plt):
         for arch_name in arch_names
     ]
     back_f1s = [
-        [m["back_f1"] for m in metrics_per_arch[arch_name]]
-        for arch_name in arch_names
+        [m["back_f1"] for m in metrics_per_arch[arch_name]] for arch_name in arch_names
     ]
     left_f1s = [
-        [m["left_f1"] for m in metrics_per_arch[arch_name]]
-        for arch_name in arch_names
+        [m["left_f1"] for m in metrics_per_arch[arch_name]] for arch_name in arch_names
     ]
     right_f1s = [
-        [m["right_f1"] for m in metrics_per_arch[arch_name]]
-        for arch_name in arch_names
+        [m["right_f1"] for m in metrics_per_arch[arch_name]] for arch_name in arch_names
     ]
 
     # Combine data
@@ -822,18 +818,18 @@ def _(architectures, metrics_per_arch, plt):
 
     # Create labels
     labels = (
-        [f"{name} (Forward)" for name in arch_names] +
-        [f"{name} (Back)" for name in arch_names] +
-        [f"{name} (Left)" for name in arch_names] +
-        [f"{name} (Right)" for name in arch_names]
+        [f"{name} (Forward)" for name in arch_names]
+        + [f"{name} (Back)" for name in arch_names]
+        + [f"{name} (Left)" for name in arch_names]
+        + [f"{name} (Right)" for name in arch_names]
     )
 
     # Colors
     _colors = (
-        ["red"] * len(arch_names) +
-        ["blue"] * len(arch_names) +
-        ["green"] * len(arch_names) +
-        ["orange"] * len(arch_names)
+        ["red"] * len(arch_names)
+        + ["blue"] * len(arch_names)
+        + ["green"] * len(arch_names)
+        + ["orange"] * len(arch_names)
     )
 
     plt.figure(figsize=(20, 8))
@@ -941,8 +937,20 @@ def _(best_arch_name, epochs, metrics_per_arch, np, plt):
 
         # --- Plot 2: Forward Errors ---
         plt.subplot(2, 3, 2)
-        plt.plot(epochs_range, train_forward_error, label="Forward Train Error", color="red", linestyle="-")
-        plt.plot(epochs_range, val_forward_error, label="Forward Val Error", color="red", linestyle="--")
+        plt.plot(
+            epochs_range,
+            train_forward_error,
+            label="Forward Train Error",
+            color="red",
+            linestyle="-",
+        )
+        plt.plot(
+            epochs_range,
+            val_forward_error,
+            label="Forward Val Error",
+            color="red",
+            linestyle="--",
+        )
         plt.xlabel("Epoch")
         plt.ylabel("Error (1 - Accuracy)")
         plt.title("Forward Train vs Validation Error")
@@ -951,8 +959,20 @@ def _(best_arch_name, epochs, metrics_per_arch, np, plt):
 
         # --- Plot 3: Back Errors ---
         plt.subplot(2, 3, 3)
-        plt.plot(epochs_range, train_back_error, label="Back Train Error", color="blue", linestyle="-")
-        plt.plot(epochs_range, val_back_error, label="Back Val Error", color="blue", linestyle="--")
+        plt.plot(
+            epochs_range,
+            train_back_error,
+            label="Back Train Error",
+            color="blue",
+            linestyle="-",
+        )
+        plt.plot(
+            epochs_range,
+            val_back_error,
+            label="Back Val Error",
+            color="blue",
+            linestyle="--",
+        )
         plt.xlabel("Epoch")
         plt.ylabel("Error (1 - Accuracy)")
         plt.title("Back Train vs Validation Error")
@@ -961,8 +981,20 @@ def _(best_arch_name, epochs, metrics_per_arch, np, plt):
 
         # --- Plot 4: Left Errors ---
         plt.subplot(2, 3, 4)
-        plt.plot(epochs_range, train_left_error, label="Left Train Error", color="green", linestyle="-")
-        plt.plot(epochs_range, val_left_error, label="Left Val Error", color="green", linestyle="--")
+        plt.plot(
+            epochs_range,
+            train_left_error,
+            label="Left Train Error",
+            color="green",
+            linestyle="-",
+        )
+        plt.plot(
+            epochs_range,
+            val_left_error,
+            label="Left Val Error",
+            color="green",
+            linestyle="--",
+        )
         plt.xlabel("Epoch")
         plt.ylabel("Error (1 - Accuracy)")
         plt.title("Left Train vs Validation Error")
@@ -971,8 +1003,20 @@ def _(best_arch_name, epochs, metrics_per_arch, np, plt):
 
         # --- Plot 5: Right Errors ---
         plt.subplot(2, 3, 5)
-        plt.plot(epochs_range, train_right_error, label="Right Train Error", color="orange", linestyle="-")
-        plt.plot(epochs_range, val_right_error, label="Right Val Error", color="orange", linestyle="--")
+        plt.plot(
+            epochs_range,
+            train_right_error,
+            label="Right Train Error",
+            color="orange",
+            linestyle="-",
+        )
+        plt.plot(
+            epochs_range,
+            val_right_error,
+            label="Right Val Error",
+            color="orange",
+            linestyle="--",
+        )
         plt.xlabel("Epoch")
         plt.ylabel("Error (1 - Accuracy)")
         plt.title("Right Train vs Validation Error")
@@ -1015,7 +1059,7 @@ def _(
         X_full.shape[1], best_hidden_layers, dropout_rate, best_activation
     ).to(device)
     final_criterion = nn.BCEWithLogitsLoss()
-    final_optimizer = optim.SGD(final_model.parameters(), lr=learning_rate, momentum=0.1)
+    final_optimizer = optim.Adam(final_model.parameters(), lr=learning_rate)
 
     for _epoch in range(1, epochs + 1):
         _loss = train_one_epoch(
@@ -1026,9 +1070,7 @@ def _(
 
     # --- Save Final Model ---
     torch.save(final_model.state_dict(), "./model/driving_policy.pth")
-    print(
-        "✅ Final model trained on all data saved to './model/driving_policy.pth'"
-    )
+    print("✅ Final model trained on all data saved to './model/driving_policy.pth'")
     return (final_model,)
 
 
@@ -1043,10 +1085,11 @@ def _(
     device,
     f1_score,
     final_model,
+    m,
     torch,
     y_test,
 ):
-    # Assume X_test_scaled and y_test are prepared similarly to training data
+    m# Assume X_test_scaled and y_test are prepared similarly to training data
     X_test_np = X_test_scaled.to_numpy()
     y_test_np = y_test.to_numpy()  # Already 0/1 binary
 
@@ -1101,9 +1144,7 @@ def _(confusion_matrix, np, plt, y_pred_test, y_true_test):
 
     for idx, (name, cmap) in enumerate(zip(_label_names, colors)):
         _ax = __axes[idx // 2, idx % 2]
-        cm = confusion_matrix(
-            y_true_test[:, idx], y_pred_test[:, idx], labels=[0, 1]
-        )
+        cm = confusion_matrix(y_true_test[:, idx], y_pred_test[:, idx], labels=[0, 1])
         im = _ax.imshow(cm, cmap=cmap, aspect="auto")
         _ax.set_xticks([0, 1])
         _ax.set_xticklabels(["0", "1"])

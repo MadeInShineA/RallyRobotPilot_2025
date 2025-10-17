@@ -67,7 +67,6 @@ class ExampleNNMsgProcessor:
         self.model.eval()
 
     def nn_infer(self, message):
-        print(f"Message: {message}")
         # Extract features: raycasts + car_speed
         features = list(message.raycast_distances) + [message.car_speed]
         features_scaled = self.scaler_X.transform([features])
@@ -79,21 +78,28 @@ class ExampleNNMsgProcessor:
         with torch.no_grad():
             logits = self.model(x)  # (1, 4)
             probs = torch.sigmoid(logits)
-            print(f"Probs: {probs.squeeze(0).numpy()}")
             preds = (probs > 0.5).squeeze(0).numpy()  # (4,)
 
         commands = []
         # Binary predictions for each key
         if preds[0]:  # forward
             commands.append(("forward", True))
+        else:
+            commands.append(("forward", False))
         if preds[1]:  # back
             commands.append(("back", True))
+
+        else:
+            commands.append(("back", False))
         if preds[2]:  # left
             commands.append(("left", True))
+        else:
+            commands.append(("left", False))
         if preds[3]:  # right
             commands.append(("right", True))
+        else:
+            commands.append(("right", False))
 
-        print(f"Returning command {commands}")
         return commands
 
     def process_message(self, message, data_collector):
