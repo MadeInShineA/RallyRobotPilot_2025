@@ -71,7 +71,7 @@ def _(mo):
 
 @app.cell
 def _(lzma, os, pickle, pl):
-    record_dir = "./simon2/"
+    record_dir = "./records/"
 
     all_records = []  # Accumulate all records here
 
