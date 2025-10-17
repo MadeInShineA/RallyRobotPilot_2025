@@ -3,6 +3,7 @@ import torch.nn as nn
 import joblib
 import numpy as np
 import json
+import os
 from PyQt6 import QtWidgets
 
 from data_collector import DataCollectionUI
@@ -20,7 +21,7 @@ Be warned that this could also cause crash on the client side if socket sending 
 
 
 class DrivingPolicy(nn.Module):
-    def __init__(self, input_dim, hidden_layers, activation="ReLU"):
+    def __init__(self, input_dim, hidden_layers, dropout_rate, activation="ReLU"):
         super().__init__()
         layers = []
         prev_dim = input_dim
@@ -32,73 +33,81 @@ class DrivingPolicy(nn.Module):
                 layers.append(nn.Tanh())
             elif activation == "Sigmoid":
                 layers.append(nn.Sigmoid())
+            layers.append(nn.Dropout(dropout_rate))
             prev_dim = hidden_dim
-        layers.append(nn.Linear(prev_dim, 6))  # 2 outputs × 3 classes each
+        layers.append(nn.Linear(prev_dim, 4))  # 4 binary outputs
         self.net = nn.Sequential(*layers)
 
     def forward(self, x):
-        return self.net(x).view(-1, 2, 3)
+        return self.net(x)
 
 
 class ExampleNNMsgProcessor:
-    def __init__(self):
-        self.always_forward = False
+    def __init__(self, frame_interval=3, speed_threshold=15.0):
+        self.frame_interval = (
+            frame_interval  # how many frames between forced forward presses
+        )
+        self.speed_threshold = (
+            speed_threshold  # speed must be below this to force forward
+        )
+        self.frame_count = 0
+
+        model_dir = os.path.join(os.path.dirname(__file__), "../model")
         # Load scaler
-        self.scaler_X = joblib.load("./model/scaler_X.joblib")
-        # Remove feature names to avoid warning when transforming numpy array
+        self.scaler_X = joblib.load(os.path.join(model_dir, "scaler_X.joblib"))
         if hasattr(self.scaler_X, "feature_names_in_"):
             del self.scaler_X.feature_names_in_
         # Load model config
-        with open("./model/model_config.json", "r") as f:
+        with open(os.path.join(model_dir, "model_config.json"), "r") as f:
             config = json.load(f)
         # Load model
         self.model = DrivingPolicy(
-            input_dim=16,
+            input_dim=config["input_dim"],
             hidden_layers=config["hidden_layers"],
+            dropout_rate=config["dropout_rate"],
             activation=config["activation"],
         )
         self.model.load_state_dict(
-            torch.load("./model/driving_policy.pth", map_location=torch.device("cpu"))
+            torch.load(
+                os.path.join(model_dir, "driving_policy.pth"),
+                map_location=torch.device("cpu"),
+            )
         )
         self.model.eval()
 
     def nn_infer(self, message):
-        # Extract features: raycasts + car_speed
+        # Prepare features: raycasts + car speed
         features = list(message.raycast_distances) + [message.car_speed]
         features_scaled = self.scaler_X.transform([features])
-
-        # To tensor
-        x = torch.tensor(features_scaled, dtype=torch.float32)
-
-        # Inference
+        x_tensor = torch.tensor(features_scaled, dtype=torch.float32)
         with torch.no_grad():
-            logits = self.model(x)  # (1, 2, 3)
-            preds = torch.argmax(logits, dim=2).squeeze(0).numpy()  # (2,)
-
-        # Convert classes: 0 -> -1, 1 -> 0, 2 -> 1
-        throttle_class = preds[0] - 1
-        steer_class = preds[1] - 1
-
-        commands = []
-        # Throttle
-        if throttle_class == 1:
-            commands.append(("forward", True))
-        elif throttle_class == -1:
-            commands.append(("back", True))
-        # Steer
-        if steer_class == 1:
-            commands.append(("right", True))
-        elif steer_class == -1:
-            commands.append(("left", True))
-
-        print(f"Returning command {commands}")
-        return commands
+            logits = self.model(x_tensor)
+            preds = (torch.sigmoid(logits) > 0.5).squeeze(0).numpy().astype(int)
+        return preds  # preds: [forward, back, left, right]
 
     def process_message(self, message, data_collector):
-        commands = self.nn_infer(message)
+        self.frame_count += 1
 
-        for command, start in commands:
-            data_collector.onCarControlled(command, start)
+        preds = self.nn_infer(message)
+        car_speed = message.car_speed
+
+        # Override forward command every frame_interval if speed below threshold
+        if (car_speed < self.speed_threshold) and (
+            self.frame_count % self.frame_interval == 0
+        ):
+            forward_cmd = True
+        else:
+            forward_cmd = bool(preds[0])
+
+        commands = [
+            ("forward", forward_cmd),
+            ("back", bool(preds[1])),
+            ("left", bool(preds[2])),
+            ("right", bool(preds[3])),
+        ]
+
+        for command, active in commands:
+            data_collector.onCarControlled(command, active)
 
 
 if __name__ == "__main__":

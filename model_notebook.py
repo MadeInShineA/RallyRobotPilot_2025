@@ -22,7 +22,7 @@ def _():
         confusion_matrix,
         f1_score,
         accuracy_score,
-        classification_report
+        classification_report,
     )
     import joblib
     import torch
@@ -31,6 +31,7 @@ def _():
     from torch.utils.data import DataLoader, TensorDataset
     from sklearn.model_selection import KFold
     import seaborn as sns
+
     return (
         DataLoader,
         KFold,
@@ -112,7 +113,9 @@ def _(lzma, os, pickle, pl):
 
 @app.cell
 def _(mo):
-    mo.md(r"""### Clean the first frames of each record when nothing happens (all inputs are 0)""")
+    mo.md(
+        r"""### Clean the first frames of each record when nothing happens (all inputs are 0)"""
+    )
     return
 
 
@@ -158,26 +161,22 @@ def _(df_first_frames_cleaned, pl):
 def _(df_first_frames_cleaned, pl):
     df_with_no_input = df_first_frames_cleaned.with_columns(
         no_input=(
-            (pl.col("forward") == 0) &
-            (pl.col("back") == 0) &
-            (pl.col("left") == 0) &
-            (pl.col("right") == 0)
+            (pl.col("forward") == 0)
+            & (pl.col("back") == 0)
+            & (pl.col("left") == 0)
+            & (pl.col("right") == 0)
         ).cast(pl.Int8)  # 1 = no input, 0 = some input
     )
 
-
-
     no_input_per_record = (
-        df_with_no_input
-        .group_by("record")
+        df_with_no_input.group_by("record")
         .agg(
             pl.col("no_input").mean().alias("no_input_fraction"),
             pl.col("no_input").sum().alias("no_input_count"),
-            pl.len().alias("total_frames")
+            pl.len().alias("total_frames"),
         )
         .sort("no_input_fraction", descending=True)
     )
-
 
     no_input_per_record
     return (no_input_per_record,)
@@ -201,7 +200,7 @@ def _(no_input_per_record, plt):
 
     # Optional: add percentage labels
     for _i, _frac in enumerate(fractions):
-        _ax.text(_frac + 0.01, _i, f"{_frac:.1%}", va='center', fontsize=9)
+        _ax.text(_frac + 0.01, _i, f"{_frac:.1%}", va="center", fontsize=9)
 
     _ax.invert_yaxis()  # Longest on top
     plt.tight_layout()
@@ -212,10 +211,10 @@ def _(no_input_per_record, plt):
 @app.cell
 def _(df_last_frames_cleaned, pl):
     df_with_input_only = df_last_frames_cleaned.filter(
-        (pl.col("forward") != 0) |
-        (pl.col("back") != 0) |
-        (pl.col("left") != 0) |
-        (pl.col("right") != 0)
+        (pl.col("forward") != 0)
+        | (pl.col("back") != 0)
+        | (pl.col("left") != 0)
+        | (pl.col("right") != 0)
     )
     return
 
@@ -267,19 +266,22 @@ def _(mo):
 def _(df_lengths_filtered, pl, sns):
     def ctrl_stripplots():
         control_names = ["forward", "back", "left", "right"]
-        subset = df_lengths_filtered.select(
-            ["frame_idx", "record"] + control_names
-        )
+        subset = df_lengths_filtered.select(["frame_idx", "record"] + control_names)
         long_df = subset.unpivot(
             on=control_names,
             index=("frame_idx", "record"),
             variable_name="control",
-            value_name="active"
+            value_name="active",
         ).filter(pl.col("active") == 1)
 
         g = sns.FacetGrid(long_df, row="record", aspect=3)
-        return g.map_dataframe(sns.stripplot, x="frame_idx", y="control", hue="control", palette=["green", "red", "blue", "orange"])
-
+        return g.map_dataframe(
+            sns.stripplot,
+            x="frame_idx",
+            y="control",
+            hue="control",
+            palette=["green", "red", "blue", "orange"],
+        )
 
     ctrl_stripplots()
     return
@@ -287,67 +289,50 @@ def _(df_lengths_filtered, pl, sns):
 
 @app.cell
 def _(df_lengths_filtered, np, pl, plt):
-    # Compute usage per file: include "no throttle" and "no steer"
+    # Compute usage per file for each control
     usage_df = (
-        df_lengths_filtered
-        .with_columns(
-            # Define "throttle active" as forward OR back (sum if non-overlapping)
-            (pl.col("forward") + pl.col("back")).alias("throttle_active"),
-            (pl.col("left") + pl.col("right")).alias("steer_active"),
-        )
-        .with_columns(
-            # "No throttle" = 1 - throttle_active
-            # "No steer" = 1 - steer_active
-            (1 - pl.col("throttle_active")).alias("no_throttle"),
-            (1 - pl.col("steer_active")).alias("no_steer"),
-        )
-        .group_by("record")
+        df_lengths_filtered.group_by("record")
         .agg(
             pl.col("forward").mean().alias("forward_usage"),
             pl.col("back").mean().alias("back_usage"),
             pl.col("left").mean().alias("left_usage"),
             pl.col("right").mean().alias("right_usage"),
-            pl.col("no_throttle").mean().alias("no_throttle_usage"),
-            pl.col("no_steer").mean().alias("no_steer_usage"),
         )
         .sort("record")
     )
 
-    # Prepare data for heatmap — now 6 columns
-    control_cols = [
-        "forward_usage", "back_usage",
-        "left_usage", "right_usage",
-        "no_throttle_usage", "no_steer_usage"
-    ]
+    # Prepare data for heatmap — 4 columns
+    control_cols = ["forward_usage", "back_usage", "left_usage", "right_usage"]
     usage_matrix = usage_df.select(control_cols).to_numpy()
     records_sorted = usage_df["record"].to_list()
 
     # Plot heatmap
-    fig, ax = plt.subplots(figsize=(10, max(4, 0.5 * len(records_sorted))))
-    im = ax.imshow(usage_matrix, cmap="Blues", aspect="auto")
+    _fig, _ax = plt.subplots(figsize=(10, max(4, 0.5 * len(records_sorted))))
+    _im = _ax.imshow(usage_matrix, cmap="Blues", aspect="auto")
 
     # Set ticks
-    ax.set_yticks(np.arange(len(records_sorted)))
-    ax.set_yticklabels(records_sorted)
-    ax.set_xticks(np.arange(len(control_cols)))
-    ax.set_xticklabels([
-        "Forward", "Back", "Left", "Right", "No Throttle", "No Steer"
-    ], rotation=45, ha="right")
+    _ax.set_yticks(np.arange(len(records_sorted)))
+    _ax.set_yticklabels(records_sorted)
+    _ax.set_xticks(np.arange(len(control_cols)))
+    _ax.set_xticklabels(["Forward", "Back", "Left", "Right"], rotation=45, ha="right")
 
     # Add colorbar
-    plt.colorbar(im, ax=ax, label="Fraction of time active")
+    plt.colorbar(_im, ax=_ax, label="Fraction of time active")
 
     # Add text annotations
     for _i in range(len(records_sorted)):
         for _j in range(len(control_cols)):
             _val = usage_matrix[_i, _j]
-            text = ax.text(
-                _j, _i, f"{_val:.2f}",
-                ha="center", va="center",
+            text = _ax.text(
+                _j,
+                _i,
+                f"{_val:.2f}",
+                ha="center",
+                va="center",
                 color="black" if _val < 0.5 else "white",
             )
 
-    ax.set_title("Control Usage per Record (including idle states)")
+    _ax.set_title("Control Usage per Record")
     plt.tight_layout()
     plt.show()
     return
@@ -469,8 +454,9 @@ def _(
     train_test_split,
 ):
     # --- 1. Split by RECORD first
-    df_train, df_test = train_test_split(df_lengths_filtered, test_size=0.2, random_state=42)
-
+    df_train, df_test = train_test_split(
+        df_lengths_filtered, test_size=0.2, random_state=42
+    )
 
     # --- 2. Prepare feature and label columns
     feature_cols = ray_cols + ["car_speed"]
@@ -528,14 +514,7 @@ def _(mo):
 @app.cell
 def _():
     architectures = [
-
-        ("1_layer_16_ReLU", [16], "ReLU"),
-        ("1_layer_32_ReLU", [32], "ReLU"),
-        ("1_layer_128_ReLU", [128], "ReLU"),
-
-        ("2_layer_16_8_ReLU", [16, 8], "ReLU"),
-        ("2_layer_32_8_ReLU", [32, 8], "ReLU"),
-        ("2_layer_32_16_ReLU", [32, 16], "ReLU"),
+        ("3_layer_32_32_32_ReLU", [32, 32, 32], "ReLU"),
     ]
     return (architectures,)
 
@@ -562,24 +541,25 @@ def _(
     torch,
     y_train,
 ):
-
     # --- Hyperparameters ---
     n_splits = 2
-    epochs = 100
-    batch_size = 256
-    learning_rate = 5e-2
+    epochs = 200
+    batch_size = 100
+    learning_rate = 1e-3
+    dropout_rate = 0.25
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    criterion = nn.CrossEntropyLoss()
+    weights = torch.tensor([5.0, 1.0, 2.0, 2.0], dtype=torch.float32).to(device)
+    criterion = nn.BCEWithLogitsLoss(weight=weights)
 
     # --- Data Preparation ---
     X_train_np = X_train_scaled.to_numpy()  # Convert Polars dataframe to numpy
-    y_train_np = y_train.to_numpy()
-    y_train_np = (y_train_np + 1).astype(np.int64)  # Map [-1, 0, 1] to [0, 1, 2]
+    y_train_np = y_train.to_numpy().astype(np.float32)  # Labels are already 0/1
 
     # --- Model Definition ---
     class DrivingPolicy(nn.Module):
-        def __init__(self, input_dim, hidden_layers, activation="ReLU"):
+        def __init__(
+            self, input_dim, hidden_layers, dropout_rate=0.3, activation="ReLU"
+        ):
             super().__init__()
             layers = []
             prev_dim = input_dim
@@ -591,13 +571,15 @@ def _(
                     layers.append(nn.Tanh())
                 elif activation == "Sigmoid":
                     layers.append(nn.Sigmoid())
+                # Add dropout after activation
+                layers.append(nn.Dropout(dropout_rate))
                 prev_dim = hidden_dim
-            layers.append(nn.Linear(prev_dim, 6))  # 2 outputs × 3 classes each
+            layers.append(nn.Linear(prev_dim, 4))  # 4 outputs × 2 classes each
             self.net = nn.Sequential(*layers)
 
         def forward(self, x):
-            # Output shape: (batch_size, 2, 3)
-            return self.net(x).view(-1, 2, 3)
+            # Output shape: (batch_size, 4)
+            return self.net(x)
 
     # --- Training and Evaluation Functions ---
     def train_one_epoch(model, dataloader, criterion, optimizer):
@@ -607,7 +589,7 @@ def _(
             batch_X, batch_y = batch_X.to(device), batch_y.to(device)
             optimizer.zero_grad()
             outputs = model(batch_X)
-            loss = criterion(outputs.view(-1, 3), batch_y.view(-1))
+            loss = criterion(outputs, batch_y)
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
@@ -621,23 +603,37 @@ def _(
             for batch_X, batch_y in dataloader:
                 batch_X = batch_X.to(device)
                 outputs = model(batch_X)
-                preds = torch.argmax(outputs.cpu(), dim=2)
+                preds = (torch.sigmoid(outputs) > 0.5).cpu().numpy().astype(int)
                 all_preds.append(preds)
-                all_targets.append(batch_y)
-        y_pred = torch.cat(all_preds).numpy()
-        y_true = torch.cat(all_targets).numpy()
+                all_targets.append(batch_y.cpu().numpy())
+        y_pred = np.concatenate(all_preds)
+        y_true = np.concatenate(all_targets)
         return y_true, y_pred
 
     def compute_accuracy(y_true, y_pred):
-        throttle_acc = accuracy_score(y_true[:, 0], y_pred[:, 0])
-        steer_acc = accuracy_score(y_true[:, 1], y_pred[:, 1])
-        return throttle_acc, steer_acc
+        forward_acc = accuracy_score(y_true[:, 0], y_pred[:, 0])
+        back_acc = accuracy_score(y_true[:, 1], y_pred[:, 1])
+        left_acc = accuracy_score(y_true[:, 2], y_pred[:, 2])
+        right_acc = accuracy_score(y_true[:, 3], y_pred[:, 3])
+        return forward_acc, back_acc, left_acc, right_acc
 
     def print_classification_reports(y_true, y_pred):
-        print("\nThrottle Classification Report:")
-        print(classification_report(y_true[:, 0], y_pred[:, 0], target_names=["-1", "0", "1"]))
-        print("Steer Classification Report:")
-        print(classification_report(y_true[:, 1], y_pred[:, 1], target_names=["-1", "0", "1"]))
+        print("\nForward Classification Report:")
+        print(
+            classification_report(y_true[:, 0], y_pred[:, 0], target_names=["0", "1"])
+        )
+        print("Back Classification Report:")
+        print(
+            classification_report(y_true[:, 1], y_pred[:, 1], target_names=["0", "1"])
+        )
+        print("Left Classification Report:")
+        print(
+            classification_report(y_true[:, 2], y_pred[:, 2], target_names=["0", "1"])
+        )
+        print("Right Classification Report:")
+        print(
+            classification_report(y_true[:, 3], y_pred[:, 3], target_names=["0", "1"])
+        )
 
     # --- K-Fold Cross Validation ---
     metrics_per_arch = {arch_name: [] for arch_name, _, _ in architectures}
@@ -650,72 +646,132 @@ def _(
 
         # Prepare data loaders for this fold
         X_tr = torch.tensor(X_train_np[train_idx], dtype=torch.float32)
-        y_tr = torch.tensor(y_train_np[train_idx], dtype=torch.long)
+        y_tr = torch.tensor(y_train_np[train_idx], dtype=torch.float32)
         X_val = torch.tensor(X_train_np[val_idx], dtype=torch.float32)
-        y_val = torch.tensor(y_train_np[val_idx], dtype=torch.long)
+        y_val = torch.tensor(y_train_np[val_idx], dtype=torch.float32)
 
-        train_loader = DataLoader(TensorDataset(X_tr, y_tr), batch_size=batch_size, shuffle=True)
+        train_loader = DataLoader(
+            TensorDataset(X_tr, y_tr), batch_size=batch_size, shuffle=True
+        )
         val_loader = DataLoader(TensorDataset(X_val, y_val), batch_size=batch_size)
 
         for arch_name, hidden_layers, activation in architectures:
             print(f"Training {arch_name}...")
             # Initialize model, optimizer, loss function
-            model = DrivingPolicy(X_tr.shape[1], hidden_layers, activation).to(device)
+            model = DrivingPolicy(
+                X_tr.shape[1], hidden_layers, dropout_rate, activation
+            ).to(device)
             _optimizer = optim.Adam(model.parameters(), lr=learning_rate)
 
             # Track metrics per epoch
             train_losses = []
-            train_throttle_accs = []
-            train_steer_accs = []
-            val_throttle_accs = []
-            val_steer_accs = []
+            train_forward_accs = []
+            train_back_accs = []
+            train_left_accs = []
+            train_right_accs = []
+            val_forward_accs = []
+            val_back_accs = []
+            val_left_accs = []
+            val_right_accs = []
 
             for epoch in range(1, epochs + 1):
                 loss = train_one_epoch(model, train_loader, criterion, _optimizer)
                 train_losses.append(loss)
 
                 y_true_train, y_pred_train = evaluate(model, train_loader)
-                train_throttle_acc, train_steer_acc = compute_accuracy(y_true_train, y_pred_train)
-                train_throttle_accs.append(train_throttle_acc)
-                train_steer_accs.append(train_steer_acc)
-                train_throttle_f1 = f1_score(y_true_train[:, 0], y_pred_train[:, 0], average="weighted")
-                train_steer_f1 = f1_score(y_true_train[:, 1], y_pred_train[:, 1], average="weighted")
+                train_forward_acc, train_back_acc, train_left_acc, train_right_acc = (
+                    compute_accuracy(y_true_train, y_pred_train)
+                )
+                train_forward_accs.append(train_forward_acc)
+                train_back_accs.append(train_back_acc)
+                train_left_accs.append(train_left_acc)
+                train_right_accs.append(train_right_acc)
+                train_forward_f1 = f1_score(
+                    y_true_train[:, 0], y_pred_train[:, 0], average="binary"
+                )
+                train_back_f1 = f1_score(
+                    y_true_train[:, 1], y_pred_train[:, 1], average="binary"
+                )
+                train_left_f1 = f1_score(
+                    y_true_train[:, 2], y_pred_train[:, 2], average="binary"
+                )
+                train_right_f1 = f1_score(
+                    y_true_train[:, 3], y_pred_train[:, 3], average="binary"
+                )
 
                 y_true_val, y_pred_val = evaluate(model, val_loader)
-                val_throttle_acc, val_steer_acc = compute_accuracy(y_true_val, y_pred_val)
-                val_throttle_accs.append(val_throttle_acc)
-                val_steer_accs.append(val_steer_acc)
-                val_throttle_f1 = f1_score(y_true_val[:, 0], y_pred_val[:, 0], average="weighted")
-                val_steer_f1 = f1_score(y_true_val[:, 1], y_pred_val[:, 1], average="weighted")
+                val_forward_acc, val_back_acc, val_left_acc, val_right_acc = (
+                    compute_accuracy(y_true_val, y_pred_val)
+                )
+                val_forward_accs.append(val_forward_acc)
+                val_back_accs.append(val_back_acc)
+                val_left_accs.append(val_left_acc)
+                val_right_accs.append(val_right_acc)
+                val_forward_f1 = f1_score(
+                    y_true_val[:, 0], y_pred_val[:, 0], average="binary"
+                )
+                val_back_f1 = f1_score(
+                    y_true_val[:, 1], y_pred_val[:, 1], average="binary"
+                )
+                val_left_f1 = f1_score(
+                    y_true_val[:, 2], y_pred_val[:, 2], average="binary"
+                )
+                val_right_f1 = f1_score(
+                    y_true_val[:, 3], y_pred_val[:, 3], average="binary"
+                )
 
-                print(f"Epoch {epoch:03} | Loss: {loss:.4f} | "
-                      f"Train Throttle F1 weighted: {train_throttle_f1:.3f} | Train Steer F1 weighted: {train_steer_f1:.3f} | "
-                      f"Val Throttle F1 weighted: {val_throttle_f1:.3f} | Val Steer F1 weighted: {val_steer_f1:.3f}")
+                print(
+                    f"Epoch {epoch:03} | Loss: {loss:.4f} | "
+                    f"Train Forward F1: {train_forward_f1:.3f} | Train Back F1: {train_back_f1:.3f} | Train Left F1: {train_left_f1:.3f} | Train Right F1: {train_right_f1:.3f} | "
+                    f"Val Forward F1: {val_forward_f1:.3f} | Val Back F1: {val_back_f1:.3f} | Val Left F1: {val_left_f1:.3f} | Val Right F1: {val_right_f1:.3f}"
+                )
 
                 if epoch == epochs:
                     # Final metrics and report
-                    throttle_f1 = f1_score(y_true_val[:, 0], y_pred_val[:, 0], average="weighted")
-                    steer_f1 = f1_score(y_true_val[:, 1], y_pred_val[:, 1], average="weighted")
+                    forward_f1 = f1_score(
+                        y_true_val[:, 0], y_pred_val[:, 0], average="binary"
+                    )
+                    back_f1 = f1_score(
+                        y_true_val[:, 1], y_pred_val[:, 1], average="binary"
+                    )
+                    left_f1 = f1_score(
+                        y_true_val[:, 2], y_pred_val[:, 2], average="binary"
+                    )
+                    right_f1 = f1_score(
+                        y_true_val[:, 3], y_pred_val[:, 3], average="binary"
+                    )
                     print_classification_reports(y_true_val, y_pred_val)
 
-                    metrics_per_arch[arch_name].append({
-                        "train_loss": train_losses,
-                        "train_throttle_acc": train_throttle_accs,
-                        "train_steer_acc": train_steer_accs,
-                        "val_throttle_acc": val_throttle_accs,
-                        "val_steer_acc": val_steer_accs,
-                        "final_throttle_acc": val_throttle_accs[-1],
-                        "final_steer_acc": val_steer_accs[-1],
-                        "throttle_f1": throttle_f1,
-                        "steer_f1": steer_f1
-                    })
+                    metrics_per_arch[arch_name].append(
+                        {
+                            "train_loss": train_losses,
+                            "train_forward_acc": train_forward_accs,
+                            "train_back_acc": train_back_accs,
+                            "train_left_acc": train_left_accs,
+                            "train_right_acc": train_right_accs,
+                            "val_forward_acc": val_forward_accs,
+                            "val_back_acc": val_back_accs,
+                            "val_left_acc": val_left_accs,
+                            "val_right_acc": val_right_accs,
+                            "final_forward_acc": val_forward_accs[-1],
+                            "final_back_acc": val_back_accs[-1],
+                            "final_left_acc": val_left_accs[-1],
+                            "final_right_acc": val_right_accs[-1],
+                            "forward_f1": forward_f1,
+                            "back_f1": back_f1,
+                            "left_f1": left_f1,
+                            "right_f1": right_f1,
+                        }
+                    )
     return (
         DrivingPolicy,
         X_train_np,
         batch_size,
         device,
+        dropout_rate,
         epochs,
         learning_rate,
+        weights,
         metrics_per_arch,
         train_one_epoch,
         y_train_np,
@@ -724,51 +780,90 @@ def _(
 
 @app.cell
 def _(architectures, metrics_per_arch, plt):
-
     # --- Summary Plots Across Architectures ---
     arch_names = [arch_name for arch_name, _, _ in architectures]
-    throttle_accuracies = [[m["final_throttle_acc"] for m in metrics_per_arch[arch_name]] for arch_name in arch_names]
-    steer_accuracies = [[m["final_steer_acc"] for m in metrics_per_arch[arch_name]] for arch_name in arch_names]
-    throttle_f1s = [[m["throttle_f1"] for m in metrics_per_arch[arch_name]] for arch_name in arch_names]
-    steer_f1s = [[m["steer_f1"] for m in metrics_per_arch[arch_name]] for arch_name in arch_names]
+    forward_accuracies = [
+        [m["final_forward_acc"] for m in metrics_per_arch[arch_name]]
+        for arch_name in arch_names
+    ]
+    back_accuracies = [
+        [m["final_back_acc"] for m in metrics_per_arch[arch_name]]
+        for arch_name in arch_names
+    ]
+    left_accuracies = [
+        [m["final_left_acc"] for m in metrics_per_arch[arch_name]]
+        for arch_name in arch_names
+    ]
+    right_accuracies = [
+        [m["final_right_acc"] for m in metrics_per_arch[arch_name]]
+        for arch_name in arch_names
+    ]
+    forward_f1s = [
+        [m["forward_f1"] for m in metrics_per_arch[arch_name]]
+        for arch_name in arch_names
+    ]
+    back_f1s = [
+        [m["back_f1"] for m in metrics_per_arch[arch_name]] for arch_name in arch_names
+    ]
+    left_f1s = [
+        [m["left_f1"] for m in metrics_per_arch[arch_name]] for arch_name in arch_names
+    ]
+    right_f1s = [
+        [m["right_f1"] for m in metrics_per_arch[arch_name]] for arch_name in arch_names
+    ]
 
     # Combine data
-    acc_data = throttle_accuracies + steer_accuracies
-    f1_data = throttle_f1s + steer_f1s
+    acc_data = forward_accuracies + back_accuracies + left_accuracies + right_accuracies
+    f1_data = forward_f1s + back_f1s + left_f1s + right_f1s
 
-    # Create labels: e.g., ["Arch1 (Throttle)", "Arch2 (Throttle)", ..., "Arch1 (Steer)", ...]
-    labels = [f"{name} (Throttle)" for name in arch_names] + [f"{name} (Steer)" for name in arch_names]
+    # Create labels
+    labels = (
+        [f"{name} (Forward)" for name in arch_names]
+        + [f"{name} (Back)" for name in arch_names]
+        + [f"{name} (Left)" for name in arch_names]
+        + [f"{name} (Right)" for name in arch_names]
+    )
 
-    # Colors: first half = throttle (e.g., skyblue), second half = steer (e.g., lightcoral)
-    colors = ['skyblue'] * len(arch_names) + ['lightcoral'] * len(arch_names)
+    # Colors
+    colors = (
+        ["green"] * len(arch_names)
+        + ["red"] * len(arch_names)
+        + ["blue"] * len(arch_names)
+        + ["orange"] * len(arch_names)
+    )
 
     plt.figure(figsize=(16, 5))
 
     # --- Accuracy subplot ---
     plt.subplot(1, 2, 1)
     bp1 = plt.boxplot(acc_data, patch_artist=True, tick_labels=labels)
-    for patch, color in zip(bp1['boxes'], colors):
+    for patch, color in zip(bp1["boxes"], colors):
         patch.set_facecolor(color)
     plt.title("Final Accuracy per Architecture (Throttle + Steer)")
     plt.ylabel("Accuracy")
-    plt.xticks(rotation=45, ha='right')
+    plt.xticks(rotation=45, ha="right")
 
     # --- F1 subplot ---
     plt.subplot(1, 2, 2)
     bp2 = plt.boxplot(f1_data, patch_artist=True, tick_labels=labels)
-    for patch, color in zip(bp2['boxes'], colors):
+    for patch, color in zip(bp2["boxes"], colors):
         patch.set_facecolor(color)
     plt.title("Final F1 Score per Architecture (Throttle + Steer)")
     plt.ylabel("F1 Score")
-    plt.xticks(rotation=45, ha='right')
+    plt.xticks(rotation=45, ha="right")
 
     # Add a shared legend
     from matplotlib.patches import Patch
+
     legend_elements = [
-        Patch(facecolor='skyblue', label='Throttle'),
-        Patch(facecolor='lightcoral', label='Steer')
+        Patch(facecolor="green", label="Forward"),
+        Patch(facecolor="red", label="Back"),
+        Patch(facecolor="blue", label="Left"),
+        Patch(facecolor="orange", label="Right"),
     ]
-    plt.figlegend(handles=legend_elements, loc='upper center', ncol=2, bbox_to_anchor=(0.5, 0.96))
+    plt.figlegend(
+        handles=legend_elements, loc="upper center", ncol=4, bbox_to_anchor=(0.5, 0.96)
+    )
 
     plt.tight_layout(rect=[0, 0, 1, 0.92])  # make room for legend
     plt.show()
@@ -776,23 +871,37 @@ def _(architectures, metrics_per_arch, plt):
 
 
 @app.cell
-def _(architectures, metrics_per_arch, np):
-    # Select the best architecture based on average validation weighted F1 score
+def _(X_train_scaled, architectures, dropout_rate, metrics_per_arch, np):
+    # Select the best architecture based on average validation F1 score
     arch_scores = {}
     for _arch_name, metrics_list in metrics_per_arch.items():
-        avg_throttle_f1 = np.mean([m["throttle_f1"] for m in metrics_list])
-        avg_steer_f1 = np.mean([m["steer_f1"] for m in metrics_list])
-        avg_f1 = (avg_throttle_f1 + avg_steer_f1) / 2
+        avg_forward_f1 = np.mean([m["forward_f1"] for m in metrics_list])
+        avg_back_f1 = np.mean([m["back_f1"] for m in metrics_list])
+        avg_left_f1 = np.mean([m["left_f1"] for m in metrics_list])
+        avg_right_f1 = np.mean([m["right_f1"] for m in metrics_list])
+        avg_f1 = (avg_forward_f1 + avg_back_f1 + avg_left_f1 + avg_right_f1) / 4
         arch_scores[_arch_name] = avg_f1
 
     best_arch_name = max(arch_scores, key=lambda k: arch_scores[k])
-    best_hidden_layers, best_activation = next((hidden_layers, activation) for name, hidden_layers, activation in architectures if name == best_arch_name)
+    best_hidden_layers, best_activation = next(
+        (hidden_layers, activation)
+        for name, hidden_layers, activation in architectures
+        if name == best_arch_name
+    )
 
-    print(f"Best architecture: {best_arch_name} with average validation weighted F1: {arch_scores[best_arch_name]:.4f}")
+    print(
+        f"Best architecture: {best_arch_name} with average validation weighted F1: {arch_scores[best_arch_name]:.4f}"
+    )
 
     # Save model config
     import json
-    config = {"hidden_layers": best_hidden_layers, "activation": best_activation}
+
+    config = {
+        "input_dim": X_train_scaled.shape[1],
+        "hidden_layers": best_hidden_layers,
+        "dropout_rate": dropout_rate,
+        "activation": best_activation,
+    }
     with open("./model/model_config.json", "w") as _f:
         json.dump(config, _f)
     print("Model config saved to ./model/model_config.json")
@@ -807,39 +916,111 @@ def _(best_arch_name, epochs, metrics_per_arch, np, plt):
         epochs_range = np.arange(1, epochs + 1)
 
         # Compute errors (1 - accuracy)
-        train_throttle_error = 1 - np.array(metrics["train_throttle_acc"])
-        val_throttle_error = 1 - np.array(metrics["val_throttle_acc"])
-        train_steer_error = 1 - np.array(metrics["train_steer_acc"])
-        val_steer_error = 1 - np.array(metrics["val_steer_acc"])
+        train_forward_error = 1 - np.array(metrics["train_forward_acc"])
+        val_forward_error = 1 - np.array(metrics["val_forward_acc"])
+        train_back_error = 1 - np.array(metrics["train_back_acc"])
+        val_back_error = 1 - np.array(metrics["val_back_acc"])
+        train_left_error = 1 - np.array(metrics["train_left_acc"])
+        val_left_error = 1 - np.array(metrics["val_left_acc"])
+        train_right_error = 1 - np.array(metrics["train_right_acc"])
+        val_right_error = 1 - np.array(metrics["val_right_acc"])
 
-        plt.figure(figsize=(18, 5))
+        plt.figure(figsize=(24, 10))
         plt.suptitle(f"Best Arch {best_arch_name} - Fold {_fold + 1} Training Metrics")
 
         # --- Plot 1: Train Loss ---
-        plt.subplot(1, 3, 1)
+        plt.subplot(2, 4, 1)
         plt.plot(epochs_range, metrics["train_loss"], label="Train Loss", color="blue")
         plt.xlabel("Epoch")
         plt.ylabel("Loss")
         plt.title("Train Loss")
         plt.grid(True)
 
-        # --- Plot 2: Throttle Errors ---
-        plt.subplot(1, 3, 2)
-        plt.plot(epochs_range, train_throttle_error, label="Throttle Train Error", color="green", linestyle='-')
-        plt.plot(epochs_range, val_throttle_error, label="Throttle Val Error", color="green", linestyle='--')
+        # --- Plot 2: Forward Errors ---
+        plt.subplot(2, 4, 2)
+        plt.plot(
+            epochs_range,
+            train_forward_error,
+            label="Forward Train Error",
+            color="green",
+            linestyle="-",
+        )
+        plt.plot(
+            epochs_range,
+            val_forward_error,
+            label="Forward Val Error",
+            color="green",
+            linestyle="--",
+        )
         plt.xlabel("Epoch")
         plt.ylabel("Error (1 - Accuracy)")
-        plt.title("Throttle Train vs Validation Error")
+        plt.title("Forward Train vs Validation Error")
         plt.legend()
         plt.grid(True)
 
-        # --- Plot 3: Steer Errors ---
-        plt.subplot(1, 3, 3)
-        plt.plot(epochs_range, train_steer_error, label="Steer Train Error", color="orange", linestyle='-')
-        plt.plot(epochs_range, val_steer_error, label="Steer Val Error", color="orange", linestyle='--')
+        # --- Plot 3: Back Errors ---
+        plt.subplot(2, 4, 3)
+        plt.plot(
+            epochs_range,
+            train_back_error,
+            label="Back Train Error",
+            color="red",
+            linestyle="-",
+        )
+        plt.plot(
+            epochs_range,
+            val_back_error,
+            label="Back Val Error",
+            color="red",
+            linestyle="--",
+        )
         plt.xlabel("Epoch")
         plt.ylabel("Error (1 - Accuracy)")
-        plt.title("Steer Train vs Validation Error")
+        plt.title("Back Train vs Validation Error")
+        plt.legend()
+        plt.grid(True)
+
+        # --- Plot 4: Left Errors ---
+        plt.subplot(2, 4, 4)
+        plt.plot(
+            epochs_range,
+            train_left_error,
+            label="Left Train Error",
+            color="blue",
+            linestyle="-",
+        )
+        plt.plot(
+            epochs_range,
+            val_left_error,
+            label="Left Val Error",
+            color="blue",
+            linestyle="--",
+        )
+        plt.xlabel("Epoch")
+        plt.ylabel("Error (1 - Accuracy)")
+        plt.title("Left Train vs Validation Error")
+        plt.legend()
+        plt.grid(True)
+
+        # --- Plot 5: Right Errors ---
+        plt.subplot(2, 4, 5)
+        plt.plot(
+            epochs_range,
+            train_right_error,
+            label="Right Train Error",
+            color="orange",
+            linestyle="-",
+        )
+        plt.plot(
+            epochs_range,
+            val_right_error,
+            label="Right Val Error",
+            color="orange",
+            linestyle="--",
+        )
+        plt.xlabel("Epoch")
+        plt.ylabel("Error (1 - Accuracy)")
+        plt.title("Right Train vs Validation Error")
         plt.legend()
         plt.grid(True)
 
@@ -858,7 +1039,9 @@ def _(
     best_activation,
     best_hidden_layers,
     device,
+    dropout_rate,
     epochs,
+    weights,
     learning_rate,
     nn,
     optim,
@@ -869,21 +1052,29 @@ def _(
     # --- Final Model Training on Full Dataset ---
     print("Training final model on full dataset...")
     X_full = torch.tensor(X_train_np, dtype=torch.float32)
-    y_full = torch.tensor(y_train_np, dtype=torch.long)
-    full_train_loader = DataLoader(TensorDataset(X_full, y_full), batch_size=batch_size, shuffle=True)
+    y_full = torch.tensor(y_train_np, dtype=torch.float32)
+    full_train_loader = DataLoader(
+        TensorDataset(X_full, y_full), batch_size=batch_size, shuffle=True
+    )
 
-    final_model = DrivingPolicy(X_full.shape[1], best_hidden_layers, best_activation).to(device)
-    final_criterion = nn.CrossEntropyLoss()
+    final_model = DrivingPolicy(
+        X_full.shape[1], best_hidden_layers, dropout_rate, best_activation
+    ).to(device)
+    final_criterion = nn.BCEWithLogitsLoss(weight=weights)
     final_optimizer = optim.Adam(final_model.parameters(), lr=learning_rate)
 
     for _epoch in range(1, epochs + 1):
-        _loss = train_one_epoch(final_model, full_train_loader, final_criterion, final_optimizer)
+        _loss = train_one_epoch(
+            final_model, full_train_loader, final_criterion, final_optimizer
+        )
         if _epoch % 50 == 0 or _epoch == 1 or _epoch == epochs:
             print(f"Epoch {_epoch:03} | Full Train Loss: {_loss:.4f}")
 
     # --- Save Final Model ---
     torch.save(final_model.state_dict(), "./model/driving_policy.pth")
-    print("✅ Final model trained on all data saved to './model/driving_policy_model.pth'")
+    print(
+        "✅ Final model trained on all data saved to './model/driving_policy_model.pth'"
+    )
     return (final_model,)
 
 
@@ -904,12 +1095,13 @@ def _(
 ):
     # Assume X_test_scaled and y_test are prepared similarly to training data
     X_test_np = X_test_scaled.to_numpy()
-    y_test_np = y_test.to_numpy()
-    y_test_np = (y_test_np + 1).astype(np.int64)  # Map [-1,0,1] to [0,1,2]
+    y_test_np = y_test.to_numpy().astype(np.float32)
 
     X_test_tensor = torch.tensor(X_test_np, dtype=torch.float32).to(device)
-    y_test_tensor = torch.tensor(y_test_np, dtype=torch.long).to(device)
-    test_loader = DataLoader(TensorDataset(X_test_tensor, y_test_tensor), batch_size=batch_size)
+    y_test_tensor = torch.tensor(y_test_np, dtype=torch.float32).to(device)
+    test_loader = DataLoader(
+        TensorDataset(X_test_tensor, y_test_tensor), batch_size=batch_size
+    )
 
     # Evaluate final model on test set
     final_model.eval()
@@ -919,73 +1111,90 @@ def _(
     with torch.no_grad():
         for batch_X, batch_y in test_loader:
             outputs = final_model(batch_X)
-            preds = torch.argmax(outputs, dim=2)
-            all_test_preds.append(preds.cpu())
-            all_test_targets.append(batch_y.cpu())
+            preds = (torch.sigmoid(outputs) > 0.5).cpu().numpy().astype(int)
+            all_test_preds.append(preds)
+            all_test_targets.append(batch_y.cpu().numpy())
 
-    y_pred_test = torch.cat(all_test_preds).numpy()
-    y_true_test = torch.cat(all_test_targets).numpy()
+    y_pred_test = np.concatenate(all_test_preds)
+    y_true_test = np.concatenate(all_test_targets)
 
     # Compute test accuracy and F1 scores
-    test_throttle_acc = accuracy_score(y_true_test[:, 0], y_pred_test[:, 0])
-    test_steer_acc = accuracy_score(y_true_test[:, 1], y_pred_test[:, 1])
+    test_forward_acc = accuracy_score(y_true_test[:, 0], y_pred_test[:, 0])
+    test_back_acc = accuracy_score(y_true_test[:, 1], y_pred_test[:, 1])
+    test_left_acc = accuracy_score(y_true_test[:, 2], y_pred_test[:, 2])
+    test_right_acc = accuracy_score(y_true_test[:, 3], y_pred_test[:, 3])
 
-    test_throttle_f1 = f1_score(y_true_test[:, 0], y_pred_test[:, 0], average="weighted")
-    test_steer_f1 = f1_score(y_true_test[:, 1], y_pred_test[:, 1], average="weighted")
+    test_forward_f1 = f1_score(y_true_test[:, 0], y_pred_test[:, 0], average="binary")
+    test_back_f1 = f1_score(y_true_test[:, 1], y_pred_test[:, 1], average="binary")
+    test_left_f1 = f1_score(y_true_test[:, 2], y_pred_test[:, 2], average="binary")
+    test_right_f1 = f1_score(y_true_test[:, 3], y_pred_test[:, 3], average="binary")
 
     print("\nFinal Test Set Performance:")
-    print(f"Throttle Accuracy: {test_throttle_acc:.4f}")
-    print(f"Steer Accuracy: {test_steer_acc:.4f}")
-    print(f"Throttle F1 Score weighted: {test_throttle_f1:.4f}")
-    print(f"Steer F1 Score weighted: {test_steer_f1:.4f}")
+    print(f"Forward Accuracy: {test_forward_acc:.4f}")
+    print(f"Back Accuracy: {test_back_acc:.4f}")
+    print(f"Left Accuracy: {test_left_acc:.4f}")
+    print(f"Right Accuracy: {test_right_acc:.4f}")
+    print(f"Forward F1 Score: {test_forward_f1:.4f}")
+    print(f"Back F1 Score: {test_back_f1:.4f}")
+    print(f"Left F1 Score: {test_left_f1:.4f}")
+    print(f"Right F1 Score: {test_right_f1:.4f}")
 
-    print("\nThrottle Classification Report:")
-    print(classification_report(y_true_test[:, 0], y_pred_test[:, 0], target_names=["-1", "0", "1"]))
-    print("Steer Classification Report:")
-    print(classification_report(y_true_test[:, 1], y_pred_test[:, 1], target_names=["-1", "0", "1"]))
+    print("\nForward Classification Report:")
+    print(
+        classification_report(
+            y_true_test[:, 0], y_pred_test[:, 0], target_names=["0", "1"]
+        )
+    )
+    print("Back Classification Report:")
+    print(
+        classification_report(
+            y_true_test[:, 1], y_pred_test[:, 1], target_names=["0", "1"]
+        )
+    )
+    print("Left Classification Report:")
+    print(
+        classification_report(
+            y_true_test[:, 2], y_pred_test[:, 2], target_names=["0", "1"]
+        )
+    )
+    print("Right Classification Report:")
+    print(
+        classification_report(
+            y_true_test[:, 3], y_pred_test[:, 3], target_names=["0", "1"]
+        )
+    )
     return y_pred_test, y_true_test
 
 
 @app.cell
 def _(confusion_matrix, np, plt, y_pred_test, y_true_test):
     # --- Confusion Matrices (Test Set) ---
-    _fig, _axes = plt.subplots(1, 2, figsize=(12, 5))
+    _fig, _axes = plt.subplots(2, 2, figsize=(12, 10))
 
-    # Throttle confusion matrix
-    cm_throttle = confusion_matrix(y_true_test[:, 0], y_pred_test[:, 0], labels=[0, 1, 2]).T
-    _im0 = _axes[0].imshow(cm_throttle, cmap="Blues", aspect="auto")
-    _axes[0].set_xticks([0, 1, 2])
-    _axes[0].set_xticklabels(["-1", "0", "1"])
-    _axes[0].set_yticks([0, 1, 2])
-    _axes[0].set_yticklabels(["-1", "0", "1"])
-    _axes[0].set_xlabel("True Throttle")
-    _axes[0].set_ylabel("Predicted Throttle")
-    _axes[0].set_title("Throttle Confusion Matrix")
-    plt.colorbar(_im0, ax=_axes[0], shrink=0.8)
-    for i in range(3):
-        for j in range(3):
-            val = cm_throttle[i, j]
-            _axes[0].text(j, i, str(val),
-                          ha="center", va="center",
-                          color="black" if val < np.max(cm_throttle)/2 else "white")
-
-    # Steer confusion matrix
-    cm_steer = confusion_matrix(y_true_test[:, 1], y_pred_test[:, 1], labels=[0, 1, 2]).T
-    _im1 = _axes[1].imshow(cm_steer, cmap="Blues", aspect="auto")
-    _axes[1].set_xticks([0, 1, 2])
-    _axes[1].set_xticklabels(["-1", "0", "1"])
-    _axes[1].set_yticks([0, 1, 2])
-    _axes[1].set_yticklabels(["-1", "0", "1"])
-    _axes[1].set_xlabel("True Steer")
-    _axes[1].set_ylabel("Predicted Steer")
-    _axes[1].set_title("Steer Confusion Matrix")
-    plt.colorbar(_im1, ax=_axes[1], shrink=0.8)
-    for i in range(3):
-        for j in range(3):
-            val = cm_steer[i, j]
-            _axes[1].text(j, i, str(val),
-                          ha="center", va="center",
-                          color="black" if val < np.max(cm_steer)/2 else "white")
+    controls = ["Forward", "Back", "Left", "Right"]
+    for idx, control in enumerate(controls):
+        cm = confusion_matrix(y_true_test[:, idx], y_pred_test[:, idx], labels=[0, 1]).T
+        ax = _axes[idx // 2, idx % 2]
+        _im = ax.imshow(cm, cmap="Blues", aspect="auto")
+        ax.set_xticks([0, 1])
+        ax.set_xticklabels(["0", "1"])
+        ax.set_yticks([0, 1])
+        ax.set_yticklabels(["0", "1"])
+        ax.set_xlabel(f"True {control}")
+        ax.set_ylabel(f"Predicted {control}")
+        ax.set_title(f"{control} Confusion Matrix")
+        plt.colorbar(_im, ax=ax, shrink=0.8)
+        for i in range(2):
+            for j in range(2):
+                val = cm[i, j]
+                ax.text(
+                    j,
+                    i,
+                    str(val),
+                    ha="center",
+                    va="center",
+                    color="black" if val < np.max(cm) / 2 else "white",
+                )
 
     plt.tight_layout()
     plt.show()
