@@ -43,12 +43,18 @@ class DrivingPolicy(nn.Module):
 
 
 class ExampleNNMsgProcessor:
-    def __init__(self):
-        self.always_forward = False
+    def __init__(self, frame_interval=3, speed_threshold=15.0):
+        self.frame_interval = (
+            frame_interval  # how many frames between forced forward presses
+        )
+        self.speed_threshold = (
+            speed_threshold  # speed must be below this to force forward
+        )
+        self.frame_count = 0
+
         model_dir = os.path.join(os.path.dirname(__file__), "../model")
         # Load scaler
         self.scaler_X = joblib.load(os.path.join(model_dir, "scaler_X.joblib"))
-        # Remove feature names to avoid warning when transforming numpy array
         if hasattr(self.scaler_X, "feature_names_in_"):
             del self.scaler_X.feature_names_in_
         # Load model config
@@ -70,37 +76,38 @@ class ExampleNNMsgProcessor:
         self.model.eval()
 
     def nn_infer(self, message):
-        # Extract features: raycasts + car_speed
+        # Prepare features: raycasts + car speed
         features = list(message.raycast_distances) + [message.car_speed]
         features_scaled = self.scaler_X.transform([features])
-
-        # To tensor
-        x = torch.tensor(features_scaled, dtype=torch.float32)
-
-        # Inference
+        x_tensor = torch.tensor(features_scaled, dtype=torch.float32)
         with torch.no_grad():
-            logits = self.model(x)  # (1, 4)
-            preds = (torch.sigmoid(logits) > 0.5).squeeze(0).numpy().astype(int)  # (4,)
-
-        # preds: [forward, back, left, right]
-        commands = []
-        if preds[0]:  # forward
-            commands.append(("forward", True))
-        if preds[1]:  # back
-            commands.append(("back", True))
-        if preds[2]:  # left
-            commands.append(("left", True))
-        if preds[3]:  # right
-            commands.append(("right", True))
-
-        print(f"Returning command {commands}")
-        return commands
+            logits = self.model(x_tensor)
+            preds = (torch.sigmoid(logits) > 0.5).squeeze(0).numpy().astype(int)
+        return preds  # preds: [forward, back, left, right]
 
     def process_message(self, message, data_collector):
-        commands = self.nn_infer(message)
+        self.frame_count += 1
 
-        for command, start in commands:
-            data_collector.onCarControlled(command, start)
+        preds = self.nn_infer(message)
+        car_speed = message.car_speed
+
+        # Override forward command every frame_interval if speed below threshold
+        if (car_speed < self.speed_threshold) and (
+            self.frame_count % self.frame_interval == 0
+        ):
+            forward_cmd = True
+        else:
+            forward_cmd = bool(preds[0])
+
+        commands = [
+            ("forward", forward_cmd),
+            ("back", bool(preds[1])),
+            ("left", bool(preds[2])),
+            ("right", bool(preds[3])),
+        ]
+
+        for command, active in commands:
+            data_collector.onCarControlled(command, active)
 
 
 if __name__ == "__main__":
