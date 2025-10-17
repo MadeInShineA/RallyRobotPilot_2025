@@ -46,6 +46,15 @@ and
 uv run scripts/autopilot.py
 ```
 
+<video id="myVideo" controls src="assets/video.mp4" width="720"></video>
+<script>
+  const v = document.getElementById('myVideo');
+  v.playbackRate = 5.;
+</script>
+
+
+
+
 # Generality
 
 Launching main.py starts a race with a single car on the provided track.
