@@ -31,6 +31,7 @@ def _():
     from torch.utils.data import DataLoader, TensorDataset
     from sklearn.model_selection import KFold
     import seaborn as sns
+
     return (
         DataLoader,
         KFold,
@@ -112,7 +113,9 @@ def _(lzma, os, pickle, pl):
 
 @app.cell
 def _(mo):
-    mo.md(r"""### Clean the first frames of each record when nothing happens (all inputs are 0)""")
+    mo.md(
+        r"""### Clean the first frames of each record when nothing happens (all inputs are 0)"""
+    )
     return
 
 
@@ -471,7 +474,7 @@ def _(
     X_train_scaled = pl.DataFrame(X_train_scaled, schema=feature_cols)
     X_test_scaled = pl.DataFrame(X_test_scaled, schema=feature_cols)
 
-    # --- 5. Encode labels as Polars DataFrames (throttle, steer)
+    # --- 5. Encode labels as Polars DataFrames (forward, back, left, right)
     y_train = df_train.select("forward", "back", "left", "right")
 
     y_test = df_test.select("forward", "back", "left", "right")
@@ -828,7 +831,7 @@ def _(architectures, metrics_per_arch, plt):
     bp1 = plt.boxplot(acc_data, patch_artist=True, tick_labels=labels)
     for patch, color in zip(bp1["boxes"], colors):
         patch.set_facecolor(color)
-    plt.title("Final Accuracy per Architecture (Throttle + Steer)")
+    plt.title("Final Accuracy per Architecture output")
     plt.ylabel("Accuracy")
     plt.xticks(rotation=45, ha="right")
 
@@ -837,7 +840,7 @@ def _(architectures, metrics_per_arch, plt):
     bp2 = plt.boxplot(f1_data, patch_artist=True, tick_labels=labels)
     for patch, color in zip(bp2["boxes"], colors):
         patch.set_facecolor(color)
-    plt.title("Final F1 Score per Architecture (Throttle + Steer)")
+    plt.title("Final F1 Score per Architecture output")
     plt.ylabel("F1 Score")
     plt.xticks(rotation=45, ha="right")
 
