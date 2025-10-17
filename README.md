@@ -46,6 +46,7 @@ and
 uv run scripts/autopilot.py
 ```
 
+
 # Generality
 
 Launching main.py starts a race with a single car on the provided track.
