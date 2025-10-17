@@ -31,7 +31,6 @@ def _():
     from torch.utils.data import DataLoader, TensorDataset
     from sklearn.model_selection import KFold
     import seaborn as sns
-
     return (
         DataLoader,
         KFold,
@@ -113,9 +112,7 @@ def _(lzma, os, pickle, pl):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""### Clean the first frames of each record when nothing happens (all inputs are 0)"""
-    )
+    mo.md(r"""### Clean the first frames of each record when nothing happens (all inputs are 0)""")
     return
 
 
@@ -475,18 +472,22 @@ def _(
     X_test_scaled = pl.DataFrame(X_test_scaled, schema=feature_cols)
 
     # --- 5. Encode labels as Polars DataFrames (throttle, steer)
-    y_train = df_train.select(
+    y_train = df_train.select(pl.col(
         [
-            (pl.col("forward") - pl.col("back")).alias("throttle (forward - back)"),
-            (pl.col("right") - pl.col("left")).alias("steer (right - left"),
-        ]
+            'forward',
+            'back',
+            'left',
+            'right'
+        ])
     )
 
-    y_test = df_test.select(
+    y_test = df_test.select(pl.col(
         [
-            (pl.col("forward") - pl.col("back")).alias("throttle (forward - back)"),
-            (pl.col("right") - pl.col("left")).alias("steer (right - left)"),
-        ]
+            'forward',
+            'back',
+            'left',
+            'right'
+        ])
     )
     os.makedirs("model", exist_ok=True)
     joblib.dump(scaler_X, "model/scaler_X.joblib")
@@ -720,11 +721,12 @@ def _(
                     y_true_val[:, 3], y_pred_val[:, 3], average="binary"
                 )
 
-                print(
-                    f"Epoch {epoch:03} | Loss: {loss:.4f} | "
-                    f"Train Forward F1: {train_forward_f1:.3f} | Train Back F1: {train_back_f1:.3f} | Train Left F1: {train_left_f1:.3f} | Train Right F1: {train_right_f1:.3f} | "
-                    f"Val Forward F1: {val_forward_f1:.3f} | Val Back F1: {val_back_f1:.3f} | Val Left F1: {val_left_f1:.3f} | Val Right F1: {val_right_f1:.3f}"
-                )
+                if epoch % 10 == 0:
+                    print(
+                        f"Epoch {epoch:03} | Loss: {loss:.4f} | "
+                        f"Train Forward F1: {train_forward_f1:.3f} | Train Back F1: {train_back_f1:.3f} | Train Left F1: {train_left_f1:.3f} | Train Right F1: {train_right_f1:.3f} | "
+                        f"Val Forward F1: {val_forward_f1:.3f} | Val Back F1: {val_back_f1:.3f} | Val Left F1: {val_left_f1:.3f} | Val Right F1: {val_right_f1:.3f}"
+                    )
 
                 if epoch == epochs:
                     # Final metrics and report
@@ -771,9 +773,9 @@ def _(
         dropout_rate,
         epochs,
         learning_rate,
-        weights,
         metrics_per_arch,
         train_one_epoch,
+        weights,
         y_train_np,
     )
 
@@ -1041,12 +1043,12 @@ def _(
     device,
     dropout_rate,
     epochs,
-    weights,
     learning_rate,
     nn,
     optim,
     torch,
     train_one_epoch,
+    weights,
     y_train_np,
 ):
     # --- Final Model Training on Full Dataset ---

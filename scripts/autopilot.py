@@ -43,7 +43,7 @@ class DrivingPolicy(nn.Module):
 
 
 class ExampleNNMsgProcessor:
-    def __init__(self, frame_interval=3, speed_threshold=15.0):
+    def __init__(self, frame_interval=3, speed_threshold=10.0):
         self.frame_interval = (
             frame_interval  # how many frames between forced forward presses
         )
@@ -86,19 +86,19 @@ class ExampleNNMsgProcessor:
         return preds  # preds: [forward, back, left, right]
 
     def process_message(self, message, data_collector):
-        self.frame_count += 1
 
         preds = self.nn_infer(message)
         car_speed = message.car_speed
 
         # Override forward command every frame_interval if speed below threshold
-        if (car_speed < self.speed_threshold) and (
-            self.frame_count % self.frame_interval == 0
-        ):
-            forward_cmd = True
+        forward_cmd = preds[0]
+        if self.frame_count >= self.frame_interval:
+            if car_speed < self.speed_threshold:
+                forward_cmd = True
+            elif car_speed >= self.speed_threshold:
+                self.frame_count == 0
         else:
-            forward_cmd = bool(preds[0])
-
+            self.frame_count += 1
         commands = [
             ("forward", forward_cmd),
             ("back", bool(preds[1])),
