@@ -1,4 +1,4 @@
-import os.path
+import os
 
 from rallyrobopilot import *
 
@@ -9,34 +9,54 @@ from PyQt6 import uic
 import pickle
 import lzma
 
+
 class DataCollectionUI(QtWidgets.QMainWindow):
-    def __init__(self, message_processing_callback = None):
+    def __init__(self, message_processing_callback=None):
         super().__init__()
 
         uic.loadUi("scripts/DataCollector.ui", self)
 
-        buttons = [self.forwardButton, self.backwardButton, self.rightButton, self.leftButton]
-        self.command_directions = { "w":"forward", "s":"back", "d":"right", "a":"left" }
+        buttons = [
+            self.forwardButton,
+            self.backwardButton,
+            self.rightButton,
+            self.leftButton,
+        ]
+        self.command_directions = {
+            "w": "forward",
+            "s": "back",
+            "d": "right",
+            "a": "left",
+        }
 
-        self.forwardButton.pressed.connect(lambda : self.onCarControlled("forward", True))
-        self.forwardButton.released.connect(lambda : self.onCarControlled("forward", False))
+        self.forwardButton.pressed.connect(
+            lambda: self.onCarControlled("forward", True)
+        )
+        self.forwardButton.released.connect(
+            lambda: self.onCarControlled("forward", False)
+        )
 
-        self.backwardButton.pressed.connect(lambda : self.onCarControlled("back", True))
-        self.backwardButton.released.connect(lambda : self.onCarControlled("back", False))
+        self.backwardButton.pressed.connect(lambda: self.onCarControlled("back", True))
+        self.backwardButton.released.connect(
+            lambda: self.onCarControlled("back", False)
+        )
 
-        self.rightButton.pressed.connect(lambda : self.onCarControlled("right", True))
-        self.rightButton.released.connect(lambda : self.onCarControlled("right", False))
+        self.rightButton.pressed.connect(lambda: self.onCarControlled("right", True))
+        self.rightButton.released.connect(lambda: self.onCarControlled("right", False))
 
-        self.leftButton.pressed.connect(lambda : self.onCarControlled("left", True))
-        self.leftButton.released.connect(lambda : self.onCarControlled("left", False))
+        self.leftButton.pressed.connect(lambda: self.onCarControlled("left", True))
+        self.leftButton.released.connect(lambda: self.onCarControlled("left", False))
 
         self.recordDataButton.clicked.connect(self.toggleRecord)
         self.resetButton.clicked.connect(self.resetNForget)
 
         self.autopiloting = False
+
         def toggle_autopilot():
             self.autopiloting = not self.autopiloting
-            self.AutopilotButton.setText("AutoPilot:\n" + ("ON" if self.autopiloting else "OFF"))
+            self.AutopilotButton.setText(
+                "AutoPilot:\n" + ("ON" if self.autopiloting else "OFF")
+            )
 
         self.AutopilotButton.clicked.connect(toggle_autopilot)
         self.message_processing_callback = message_processing_callback
@@ -54,6 +74,7 @@ class DataCollectionUI(QtWidgets.QMainWindow):
         self.recording = False
 
         self.recorded_data = []
+
     def collectMsg(self, msg):
         if self.recording:
             if not self.saveImgCheckBox.isChecked():
@@ -67,17 +88,26 @@ class DataCollectionUI(QtWidgets.QMainWindow):
                 self.message_processing_callback(msg, self)
 
     def resetNForget(self):
-
         if len(self.recorded_data) == 0:
             return
 
-        nbr_snapshots_to_forget = self.forgetSnapshotNumber.value() if len(self.recorded_data) > self.forgetSnapshotNumber.value() else len(self.recorded_data)-1
+        nbr_snapshots_to_forget = (
+            self.forgetSnapshotNumber.value()
+            if len(self.recorded_data) > self.forgetSnapshotNumber.value()
+            else len(self.recorded_data) - 1
+        )
 
         self.recorded_data = self.recorded_data[:-nbr_snapshots_to_forget]
         self.nbrSnapshotSaved.setText(str(len(self.recorded_data)))
 
-        self.network_interface.send_cmd("set position "+ str(self.recorded_data[-1].car_position)[1:-1].replace(" ","")+";")
-        self.network_interface.send_cmd("set rotation "+ str(self.recorded_data[-1].car_angle)+";")
+        self.network_interface.send_cmd(
+            "set position "
+            + str(self.recorded_data[-1].car_position)[1:-1].replace(" ", "")
+            + ";"
+        )
+        self.network_interface.send_cmd(
+            "set rotation " + str(self.recorded_data[-1].car_angle) + ";"
+        )
         self.network_interface.send_cmd("reset;")
 
         self.toggleRecord()
@@ -85,9 +115,10 @@ class DataCollectionUI(QtWidgets.QMainWindow):
     def toggleRecord(self):
         self.recording = not self.recording
         self.recordDataButton.setText("Recording..." if self.recording else "Record")
+
     def onCarControlled(self, direction, start):
         command_types = ["release", "push"]
-        self.network_interface.send_cmd(command_types[start] + " " + direction+";")
+        self.network_interface.send_cmd(command_types[start] + " " + direction + ";")
 
     def keyPressEvent(self, event):
         if event.isAutoRepeat():
@@ -120,7 +151,9 @@ class DataCollectionUI(QtWidgets.QMainWindow):
 
         self.saveRecordButton.setText("Saving ...")
 
-        record_name = "record_%d.npz"
+        os.makedirs("./records", exist_ok=True)
+
+        record_name = "./records/record_%d.npz"
         fid = 0
         while os.path.exists(record_name % fid):
             fid += 1
@@ -146,11 +179,13 @@ class DataCollectionUI(QtWidgets.QMainWindow):
         self.saving_worker = None
         self.saveRecordButton.setText("Save")
 
-if __name__ == "__main__":
 
+if __name__ == "__main__":
     import sys
+
     def except_hook(cls, exception, traceback):
         sys.__excepthook__(cls, exception, traceback)
+
     sys.excepthook = except_hook
 
     app = QtWidgets.QApplication(sys.argv)
