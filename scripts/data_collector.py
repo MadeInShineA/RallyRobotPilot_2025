@@ -1,4 +1,4 @@
-import os
+import os.path
 
 from rallyrobopilot import *
 
@@ -116,6 +116,14 @@ class DataCollectionUI(QtWidgets.QMainWindow):
         self.recording = not self.recording
         self.recordDataButton.setText("Recording..." if self.recording else "Record")
 
+        # Notify the game server about recording status
+        # Server will only capture images when recording is active
+        recording_status = "true" if self.recording else "false"
+        self.network_interface.send_cmd(f"set recording {recording_status};")
+        print(
+            f"[DataCollector] Recording: {self.recording} - Images will {'BE' if self.recording else 'NOT be'} captured"
+        )
+
     def onCarControlled(self, direction, start):
         command_types = ["release", "push"]
         self.network_interface.send_cmd(command_types[start] + " " + direction + ";")
@@ -151,9 +159,9 @@ class DataCollectionUI(QtWidgets.QMainWindow):
 
         self.saveRecordButton.setText("Saving ...")
 
-        os.makedirs("./records", exist_ok=True)
+        os.makedirs("./image_records", exist_ok=True)
 
-        record_name = "./records/record_%d.npz"
+        record_name = "./image_records/record_%d.npz"
         fid = 0
         while os.path.exists(record_name % fid):
             fid += 1

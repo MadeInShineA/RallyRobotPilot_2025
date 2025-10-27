@@ -5,10 +5,8 @@ import numpy as np
 
 from flask import Flask, request, jsonify
 
-
 from .sensing_message import SensingSnapshot, SensingSnapshotManager
 from .remote_commands import RemoteCommandParser
-
 
 REMOTE_CONTROLLER_VERBOSE = False
 PERIOD_REMOTE_SENSING = 0.1
@@ -39,6 +37,9 @@ class RemoteController(Entity):
         #   Period for recording --> 0.1 secods = 10 times a second
         self.sensing_period = PERIOD_REMOTE_SENSING
         self.last_sensing = -1
+
+        # Flag to control image capture - only capture when recording
+        self.recording_active = False
 
         # Setup http route for updating.
         @flask_app.route("/command", methods=["POST"])
@@ -84,14 +85,16 @@ class RemoteController(Entity):
                 self.car.multiray_sensor.collect_sensor_values()
             )
 
-            #   Collect last rendered image
-            tex = base.win.getDisplayRegion(0).getScreenshot()
-            arr = tex.getRamImageAs("RGB")
-            data = np.frombuffer(arr, np.uint8)
-            image = data.reshape(tex.getYSize(), tex.getXSize(), 3)
-            image = image[::-1, :, :]  #   Image arrives with inverted Y axis
-
-            snapshot.image = None
+            #   Collect last rendered image ONLY when recording
+            if self.recording_active:
+                tex = base.win.getDisplayRegion(0).getScreenshot()
+                arr = tex.getRamImageAs("RGB")
+                data = np.frombuffer(arr, np.uint8)
+                image = data.reshape(tex.getYSize(), tex.getXSize(), 3)
+                image = image[::-1, :, :]  # Image arrives with inverted Y axis
+                snapshot.image = image
+            else:
+                snapshot.image = None
 
             msg_mngr = SensingSnapshotManager()
             data = msg_mngr.pack(snapshot)
@@ -180,6 +183,10 @@ class RemoteController(Entity):
                         self.car.multiray_sensor.set_enabled_rays(
                             commands[2] == b"visible"
                         )
+                    elif commands[1] == b"recording":
+                        # Set recording flag to control image capture
+                        self.recording_active = commands[2] == b"true"
+                        print(f"[Remote] Recording mode: {self.recording_active}")
 
                 elif commands[0] == b"reset":
                     self.car.reset_car()
