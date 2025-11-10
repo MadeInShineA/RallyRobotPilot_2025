@@ -45,7 +45,7 @@ def prepare_game_app(track_name="SimpleTrack"):
 
     # load assets
     # SimpleTrack SlightlyHarder NotSoSImpleTrack
-    track_name = "SlightlyHarder"
+    track_name = "SimpleTrack"
     track = Track(track_name)
     print("loading assets after track creation")
     track.load_assets(global_models, global_texs)
