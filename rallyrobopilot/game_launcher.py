@@ -58,10 +58,11 @@ def prepare_game_app(track_name="SimpleTrack"):
 
     car.multiray_sensor = MultiRaySensor(car, 15, 90)
     car.multiray_sensor.enable()
+    # car.multiray_sensor.set_enabled_rays(False)
 
     # Lighting + shadows
-    sun = SunLight(direction=(-0.7, -0.9, 0.5), resolution=3072, car=car)
-    ambient = AmbientLight(color=Vec4(0.5, 0.55, 0.66, 0) * 0.75)
+    # sun = SunLight(direction=(-0.7, -0.9, 0.5), resolution=3072, car=car)
+    # ambient = AmbientLight(color=Vec4(0.5, 0.55, 0.66, 0) * 0.75)
 
     render.setShaderAuto()
 
