@@ -72,6 +72,7 @@ class RemoteController(Entity):
 
         if time.time() - self.last_sensing >= self.sensing_period:
             snapshot = SensingSnapshot()
+            snapshot.timestamp = time.time()
             snapshot.current_controls = (
                 held_keys["w"] or held_keys["up arrow"],
                 held_keys["s"] or held_keys["down arrow"],
