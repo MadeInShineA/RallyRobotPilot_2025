@@ -1,6 +1,5 @@
 from ursina import Entity, Text, color, destroy, invoke, lerp
 import json
-import os
 import time
 from pathlib import Path
 
@@ -537,4 +536,3 @@ class CheckpointHandler:
     def update(self):
         """Update method to be called in the game loop"""
         pass  # Removed glow animation for simplicity
-

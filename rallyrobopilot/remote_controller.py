@@ -85,6 +85,16 @@ class RemoteController(Entity):
                 self.car.multiray_sensor.collect_sensor_values()
             )
 
+            # Add lap info
+            if hasattr(self.car, 'checkpoint_handler') and self.car.checkpoint_handler:
+                snapshot.lap_current = self.car.checkpoint_handler.current_lap
+                snapshot.checkpoints_passed = len(self.car.checkpoint_handler.passed_checkpoints)
+                snapshot.total_checkpoints = len(self.car.checkpoint_handler.lap_checkpoints)
+            else:
+                snapshot.lap_current = 0
+                snapshot.checkpoints_passed = 0
+                snapshot.total_checkpoints = 0
+
             #   Collect last rendered image ONLY when recording
             if self.recording_active:
                 tex = base.win.getDisplayRegion(0).getScreenshot()

@@ -195,6 +195,7 @@ class Car(Entity):
         self.c_pressed = False
         self.x_pressed = False
         self.z_pressed = False
+        self.g_pressed = False
         self.tab_pressed = False
 
         # Checkpoint mode
@@ -414,6 +415,21 @@ class Car(Entity):
                 self.checkpoint_handler.clear_all_checkpoints()
             elif not held_keys["z"]:
                 self.z_pressed = False
+
+        if held_keys["g"] and not self.g_pressed:  # Reset car and checkpoint counts
+            self.g_pressed = True
+            self.reset_car()
+            if self.checkpoint_handler:
+                self.checkpoint_handler.current_lap = 0
+                self.checkpoint_handler.next_checkpoint_index = 0
+                self.checkpoint_handler.passed_checkpoints.clear()
+                for entity_data in self.checkpoint_handler.checkpoint_entities:
+                    entity_data["passed"] = False
+                    entity_data["entity"].color = color.green
+                    entity_data["text"].color = color.yellow
+                print("Car and checkpoint counts reset")
+        elif not held_keys["g"]:
+            self.g_pressed = False
 
         #   Process inputs & update speed
         if held_keys[self.controls[0]] or held_keys["up arrow"]:

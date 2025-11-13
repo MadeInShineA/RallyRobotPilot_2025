@@ -6,8 +6,10 @@ def prepare_game_app(track_name="SimpleTrack"):
     from ursina import window, Ursina
 
     # Create Window
-    window.vsync = True  # Set to false to uncap FPS limit of 60
+    window.vsync = False  # Uncapped FPS
     app = Ursina(size=(540, 960))
+    application.frame_rate = 40  # Fixed 40 FPS to match 25ms intervals
+    application.fixed_timestep = True
     print("Asset folder")
     print(application.asset_folder)
 
