@@ -236,6 +236,8 @@ class GeneticAlgorithm:
                 self.track_name,
                 "--batch",
             ]
+            if self.replay_file:
+                cmd.append(self.replay_file)
 
             # Run the subprocess
             result = subprocess.run(
