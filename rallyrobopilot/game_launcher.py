@@ -47,7 +47,6 @@ def prepare_game_app(track_name="SimpleTrack"):
 
     # load assets
     # SimpleTrack SlightlyHarder NotSoSImpleTrack
-    track_name = "SimpleTrack"
     track = Track(track_name)
     print("loading assets after track creation")
     track.load_assets(global_models, global_texs)
@@ -63,8 +62,8 @@ def prepare_game_app(track_name="SimpleTrack"):
     # car.multiray_sensor.set_enabled_rays(False)
 
     # Lighting + shadows
-    # sun = SunLight(direction=(-0.7, -0.9, 0.5), resolution=3072, car=car)
-    # ambient = AmbientLight(color=Vec4(0.5, 0.55, 0.66, 0) * 0.75)
+    sun = SunLight(direction=(-0.7, -0.9, 0.5), resolution=3072, car=car)
+    ambient = AmbientLight(color=Vec4(0.5, 0.55, 0.66, 0) * 0.75)
 
     render.setShaderAuto()
 

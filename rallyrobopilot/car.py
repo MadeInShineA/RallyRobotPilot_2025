@@ -5,6 +5,7 @@ from ursina import *
 from ursina import curve
 from .particles import Particles, TrailRenderer
 from .checkpoint_handler import CheckpointHandler
+from .sensing_message import SensingSnapshot
 from math import pow, atan2
 import json
 
@@ -574,6 +575,29 @@ class Car(Entity):
                 self.laps_text.enable()
             else:
                 self.laps_text.disable()
+
+        # Update autopilot if present
+        if hasattr(self, 'autopilot') and self.autopilot:
+            snapshot = SensingSnapshot()
+            snapshot.current_controls = (
+                held_keys["w"] or held_keys["up arrow"],
+                held_keys["s"] or held_keys["down arrow"],
+                held_keys["a"] or held_keys["left arrow"],
+                held_keys["d"] or held_keys["right arrow"],
+            )
+            snapshot.car_position = self.world_position
+            snapshot.car_speed = self.speed
+            snapshot.car_angle = self.rotation_y
+            snapshot.raycast_distances = (
+                self.multiray_sensor.collect_sensor_values() if self.multiray_sensor else []
+            )
+            if self.checkpoint_handler:
+                snapshot.checkpoints_passed = len(self.checkpoint_handler.passed_checkpoints)
+                snapshot.total_checkpoints = len(self.checkpoint_handler.lap_checkpoints)
+            else:
+                snapshot.checkpoints_passed = 0
+                snapshot.total_checkpoints = 0
+            self.autopilot.update(snapshot)
 
     def reset_car(self):
         """

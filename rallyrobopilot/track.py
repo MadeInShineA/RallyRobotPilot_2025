@@ -31,7 +31,11 @@ def load_track_metadata(track_name):
 class Track(Entity):
     def __init__(self, track_name):
 
-        self.track_name = track_name
+        # Extract folder name if full path to metadata
+        if ".json" in track_name:
+            self.track_name = track_name.split("/")[0]
+        else:
+            self.track_name = track_name
         self.data = load_track_metadata(track_name)
 
         # Find assets paths.
