@@ -9,7 +9,7 @@ from typing import List, Tuple, Union
 def load_replay_data(
     replay_file: str,
 ) -> Tuple[
-    List[Tuple[bool, bool, bool, bool]], List[Tuple[float, float, float]], List[float]
+    List[Tuple[int, int, int, int]], List[Tuple[float, float, float]], List[float]
 ]:
     """
     Load actions, positions, and angles from replay file.
@@ -29,24 +29,26 @@ def load_replay_data(
 
 
 def mutate_actions(
-    actions: List[Tuple[bool, bool, bool, bool]], mutation_rate: float = 0.3
-) -> List[Tuple[bool, bool, bool, bool]]:
+    actions: List[Tuple[int, int, int, int]], mutation_rate: float = 0.3
+) -> List[Tuple[int, int, int, int]]:
     """
-    Mutate a copy of actions by randomly replacing actions.
+    Mutate a copy of actions by randomly flipping individual values (0 or 1).
     """
     new_actions = []
     for action in actions:
-        if random.random() < mutation_rate:
-            new_actions.append(tuple(random.choice([True, False]) for _ in range(4)))
-        else:
-            new_actions.append(action)
+        mutated_action = list(action)  # Convert to list for mutation
+        for i in range(4):
+            if random.random() < mutation_rate:
+                mutated_action[i] = 1 - mutated_action[i]  # Flip 0 to 1 or 1 to 0
+        new_actions.append(tuple(mutated_action))
     return new_actions
 
 
 def generate_population_from_replay(
     replay_file: str, population_size: int, mutation_rate: float = 0.3
 ) -> Tuple[
-    List[List[Tuple[bool, bool, bool, bool]]],
+    List[Tuple[int, int, int, int]],
+    List[List[Tuple[int, int, int, int]]],
     List[Tuple[float, float, float]],
     List[float],
 ]:
@@ -59,7 +61,7 @@ def generate_population_from_replay(
     for _ in range(population_size):
         mutated = mutate_actions(base_actions, mutation_rate)
         population.append(mutated)
-    return population, positions, angles
+    return base_actions, population, positions, angles
 
 
 if __name__ == "__main__":
@@ -74,13 +76,18 @@ if __name__ == "__main__":
     replay_file = sys.argv[1]
     population_size = int(sys.argv[2])
     mutation_rate = 0.3
-    population, positions, angles = generate_population_from_replay(
+    base_actions, population, positions, angles = generate_population_from_replay(
         replay_file, population_size, mutation_rate
     )
-    with open("initial_population.json", "w") as f:
+
+    with open("genetic_data/base_actions.json", "w") as f:
+        json.dump(base_actions, f)
+    with open("genetic_data/initial_population.json", "w") as f:
         json.dump(population, f)
-    with open("replay_positions.json", "w") as f:
+    with open("genetic_data/replay_positions.json", "w") as f:
         json.dump(positions, f)
-    with open("replay_angles.json", "w") as f:
+    with open("genetic_data/replay_angles.json", "w") as f:
         json.dump(angles, f)
-    print(f"Saved initial population of {population_size} to initial_population.json")
+    print(
+        f"Saved initial population of {population_size} to genetic_data/initial_population.json"
+    )
