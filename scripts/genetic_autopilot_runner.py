@@ -6,6 +6,7 @@ import ursina
 from rallyrobopilot import prepare_game_app, RemoteController
 from flask import Flask
 from genetic_autopilot import GeneticMsgProcessor
+import time
 
 """
 Genetic Autopilot Runner
@@ -115,11 +116,18 @@ def main():
 
     # Run the game
     try:
-        app.run()
+        FPS = 15
+        frame_time = 1 / FPS
+        while True:
+            start_time = time.time()
+            app.step()
+            elapsed = time.time() - start_time
+            sleep_time = frame_time - elapsed
+            if sleep_time > 0:
+                time.sleep(sleep_time)
     except KeyboardInterrupt:
         print("\nInterrupted by user")
 
 
 if __name__ == "__main__":
     main()
-

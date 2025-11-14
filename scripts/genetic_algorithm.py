@@ -5,7 +5,6 @@ import lzma
 import pickle
 import subprocess
 import tempfile
-import time
 from typing import List, Tuple, Optional
 
 
@@ -85,23 +84,31 @@ class GeneticAlgorithm:
 
     def _initialize_population(self) -> List[List[Tuple[int, int, int, int]]]:
         """Create initial population by mutating base actions"""
-        if self.replay_file:
-            # Load base actions from replay file
-            base_actions, _, _ = self.load_replay_data(self.replay_file)
-
-            # Save base actions for future use
-            os.makedirs("genetic_data", exist_ok=True)
-            with open("genetic_data/base_actions.json", "w") as f:
-                json.dump(base_actions, f)
+        # First, try to load recorded keys from the track
+        record_file = f"genetic_data/records/{self.track_name}/record_keys.json"
+        if os.path.exists(record_file):
+            with open(record_file, "r") as f:
+                base_actions = json.load(f)
+            print(f"Using recorded inputs from {record_file} as base actions")
         else:
-            # Try to load existing base actions
-            base_actions_file = "genetic_data/base_actions.json"
-            if os.path.exists(base_actions_file):
-                with open(base_actions_file, "r") as f:
-                    base_actions = json.load(f)
+            print(f"No recorded inputs found at {record_file}, using fallback")
+            if self.replay_file:
+                # Load base actions from replay file
+                base_actions, _, _ = self.load_replay_data(self.replay_file)
+
+                # Save base actions for future use
+                os.makedirs("genetic_data", exist_ok=True)
+                with open("genetic_data/base_actions.json", "w") as f:
+                    json.dump(base_actions, f)
             else:
-                # Create default base actions (straight driving)
-                base_actions = [(1, 0, 0, 0)] * 100  # Forward for 100 steps
+                # Try to load existing base actions
+                base_actions_file = "genetic_data/base_actions.json"
+                if os.path.exists(base_actions_file):
+                    with open(base_actions_file, "r") as f:
+                        base_actions = json.load(f)
+                else:
+                    # Create default base actions (straight driving)
+                    base_actions = [(1, 0, 0, 0)] * 100  # Forward for 100 steps
 
         population = []
         for _ in range(self.population_size):
@@ -323,4 +330,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

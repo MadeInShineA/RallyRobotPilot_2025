@@ -86,16 +86,15 @@ class GeneticAutopilot:
             return
 
         # Execute current action every 10 frames
-        if self.frame_counter % 10 == 0:
-            if self.current_action_index < len(self.action_sequence):
-                action = self.action_sequence[self.current_action_index]
-                self._execute_action(action)
+        if self.current_action_index < len(self.action_sequence):
+            action = self.action_sequence[self.current_action_index]
+            self._execute_action(action)
 
-                # Move to next action
-                self.current_action_index += 1
-            else:
-                # Action sequence finished
-                self.stop_evaluation()
+            # Move to next action
+            self.current_action_index += 1
+        else:
+            # Action sequence finished
+            self.stop_evaluation()
 
     def _detect_wall_hit(self, sensing_data: SensingSnapshot) -> bool:
         """Detect if car hit a wall based on raycast distances"""
@@ -273,4 +272,3 @@ if __name__ == "__main__":
     action_file = sys.argv[1]
     processor = GeneticMsgProcessor(action_sequences_path=action_file)
     print(f"Loaded {len(processor.autopilots)} genetic autopilots")
-

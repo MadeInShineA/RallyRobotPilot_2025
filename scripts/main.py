@@ -3,6 +3,7 @@ from pathlib import Path
 from rallyrobopilot import prepare_game_app, RemoteController
 from flask import Flask
 from threading import Thread
+import time
 
 
 def get_track_path(track_name, circuit_index=None):
@@ -30,9 +31,13 @@ def list_available_tracks():
                 for f in track_files:
                     if f.name == "track_metadata.json":
                         has_main = True
-                    elif f.name.startswith("track_circuit") and f.name.endswith("_metadata.json"):
+                    elif f.name.startswith("track_circuit") and f.name.endswith(
+                        "_metadata.json"
+                    ):
                         try:
-                            idx = f.name.split("track_circuit")[1].split("_metadata.json")[0]
+                            idx = f.name.split("track_circuit")[1].split(
+                                "_metadata.json"
+                            )[0]
                             circuits.append(int(idx))
                         except:
                             pass
@@ -69,6 +74,17 @@ flask_thread = Thread(target=flask_app.run, kwargs={"host": "0.0.0.0", "port": 5
 print("Flask server running on port 5000")
 flask_thread.start()
 
-app, car = prepare_game_app(str(track_path.relative_to(Path(__file__).parent.parent / "assets")))
+app, car = prepare_game_app(
+    str(track_path.relative_to(Path(__file__).parent.parent / "assets"))
+)
 remote_controller = RemoteController(car=car, connection_port=7654, flask_app=flask_app)
-app.run()
+
+FPS = 15
+frame_time = 1 / FPS
+while True:
+    start_time = time.time()
+    app.step()
+    elapsed = time.time() - start_time
+    sleep_time = frame_time - elapsed
+    if sleep_time > 0:
+        time.sleep(sleep_time)

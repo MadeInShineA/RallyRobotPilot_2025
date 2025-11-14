@@ -8,6 +8,7 @@ from .checkpoint_handler import CheckpointHandler
 from .sensing_message import SensingSnapshot
 from math import pow, atan2
 import json
+import os
 
 sign = lambda x: -1 if x < 0 else (1 if x > 0 else 0)
 Text.default_resolution = 1080 * Text.size
@@ -198,6 +199,11 @@ class Car(Entity):
         self.z_pressed = False
         self.g_pressed = False
         self.tab_pressed = False
+        self.r_pressed = False
+
+        # Recording
+        self.recording = False
+        self.recorded_keys = []
 
         # Checkpoint mode
         self.checkpoint_mode = False
@@ -206,7 +212,7 @@ class Car(Entity):
             position=(0, -0.35),
             scale=0.8,
             color=color.yellow,
-            origin=(0, 0)  # Center it
+            origin=(0, 0),  # Center it
         )
         self.mode_text.disable()
 
@@ -218,7 +224,9 @@ class Car(Entity):
         self.rotation_y = self.reset_orientation[1]
 
         # Initialize checkpoint handler
-        self.checkpoint_handler = CheckpointHandler(track.track_name, track.origin_scale, checkpoint_size=30)
+        self.checkpoint_handler = CheckpointHandler(
+            track.track_name, track.origin_scale, checkpoint_size=30
+        )
         self.checkpoint_handler.hide_ui()
 
         # Disable rays by default
@@ -372,6 +380,8 @@ class Car(Entity):
                 self.velocity_y -= 50 * time.dt
 
     def update(self):
+        FPS = 15
+        time.dt = 1 / FPS
         # Exit if esc pressed.
         if held_keys["escape"]:
             quit()
@@ -401,7 +411,9 @@ class Car(Entity):
         if self.checkpoint_handler and self.checkpoint_mode:
             if held_keys["c"] and not self.c_pressed:  # Place checkpoint
                 self.c_pressed = True
-                self.checkpoint_handler.place_checkpoint(self.position, (0, self.rotation_y, 0), self.multiray_sensor)
+                self.checkpoint_handler.place_checkpoint(
+                    self.position, (0, self.rotation_y, 0), self.multiray_sensor
+                )
             elif not held_keys["c"]:
                 self.c_pressed = False
 
@@ -431,6 +443,24 @@ class Car(Entity):
                 print("Car and checkpoint counts reset")
         elif not held_keys["g"]:
             self.g_pressed = False
+
+        # Recording toggle
+        if held_keys["r"] and not self.r_pressed:
+            self.r_pressed = True
+            self.recording = not self.recording
+            if self.recording:
+                self.recorded_keys = []
+                print("Recording started")
+            else:
+                print("Recording stopped")
+                # Save recorded keys to file
+                trackname = self.track.track_name if self.track else "unknown"
+                path = f"genetic_data/records/{trackname}/"
+                os.makedirs(path, exist_ok=True)
+                with open(f"{path}record_keys.json", "w") as f:
+                    json.dump(self.recorded_keys, f)
+        elif not held_keys["r"]:
+            self.r_pressed = False
 
         #   Process inputs & update speed
         if held_keys[self.controls[0]] or held_keys["up arrow"]:
@@ -570,14 +600,14 @@ class Car(Entity):
             self.checkpoint_handler.update()
             self.checkpoint_handler.check_passed_checkpoints(self.position)
             lap_info = self.checkpoint_handler.get_lap_info()
-            if lap_info['total_checkpoints'] > 0:
+            if lap_info["total_checkpoints"] > 0:
                 self.laps_text.text = f"Lap {lap_info['current_lap'] + 1}: {lap_info['checkpoints_passed']}/{lap_info['total_checkpoints']}"
                 self.laps_text.enable()
             else:
                 self.laps_text.disable()
 
         # Update autopilot if present
-        if hasattr(self, 'autopilot') and self.autopilot:
+        if hasattr(self, "autopilot") and self.autopilot:
             snapshot = SensingSnapshot()
             snapshot.current_controls = (
                 held_keys["w"] or held_keys["up arrow"],
@@ -589,15 +619,32 @@ class Car(Entity):
             snapshot.car_speed = self.speed
             snapshot.car_angle = self.rotation_y
             snapshot.raycast_distances = (
-                self.multiray_sensor.collect_sensor_values() if self.multiray_sensor else []
+                self.multiray_sensor.collect_sensor_values()
+                if self.multiray_sensor
+                else []
             )
             if self.checkpoint_handler:
-                snapshot.checkpoints_passed = len(self.checkpoint_handler.passed_checkpoints)
-                snapshot.total_checkpoints = len(self.checkpoint_handler.lap_checkpoints)
+                snapshot.checkpoints_passed = len(
+                    self.checkpoint_handler.passed_checkpoints
+                )
+                snapshot.total_checkpoints = len(
+                    self.checkpoint_handler.lap_checkpoints
+                )
             else:
                 snapshot.checkpoints_passed = 0
                 snapshot.total_checkpoints = 0
             self.autopilot.update(snapshot)
+
+        # Record keys if recording
+        if self.recording:
+            self.recorded_keys.append(
+                [
+                    int(held_keys["w"] or held_keys["up arrow"]),  # forward
+                    int(held_keys["s"] or held_keys["down arrow"]),  # backward
+                    int(held_keys["a"] or held_keys["left arrow"]),  # left
+                    int(held_keys["d"] or held_keys["right arrow"]),  # right
+                ]
+            )
 
     def reset_car(self):
         """
