@@ -85,7 +85,7 @@ class GeneticAlgorithm:
     def _initialize_population(self) -> List[List[Tuple[int, int, int, int]]]:
         """Create initial population by mutating base actions"""
         # First, try to load recorded keys from the track
-        record_file = f"genetic_data/records/{self.track_name}/record.json"
+        record_file = f"genetic_data/records/{self.track_name}/complete_record.json"
         if os.path.exists(record_file):
             with open(record_file, "r") as f:
                 data = json.load(f)

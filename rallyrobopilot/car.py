@@ -454,12 +454,31 @@ class Car(Entity):
                 print("Recording started")
             else:
                 print("Recording stopped")
-                # Save recorded keys to file
+                # Save recorded data
                 trackname = self.track.track_name if self.track else "unknown"
                 path = f"genetic_data/records/{trackname}/"
                 os.makedirs(path, exist_ok=True)
-                with open(f"{path}record.json", "w") as f:
+                complete_path = f"{path}complete_record.json"
+                with open(complete_path, "w") as f:
                     json.dump(self.recorded_keys, f)
+                print(f"Complete record saved to {complete_path}")
+
+                # Split into segments
+                segments_path = f"{path}segments/"
+                os.makedirs(segments_path, exist_ok=True)
+                from collections import defaultdict
+
+                checkpoint_to_frames = defaultdict(list)
+                for frame in self.recorded_keys:
+                    cp = frame["checkpoint"]
+                    checkpoint_to_frames[cp].append(frame)
+                segments = sorted(checkpoint_to_frames.keys())
+                for i, cp in enumerate(segments):
+                    segment_data = checkpoint_to_frames[cp]
+                    segment_file = f"{segments_path}segment_{i}.json"
+                    with open(segment_file, "w") as f:
+                        json.dump(segment_data, f)
+                    print(f"Segment {i} (checkpoint {cp}) saved to {segment_file}")
         elif not held_keys["r"]:
             self.r_pressed = False
 
