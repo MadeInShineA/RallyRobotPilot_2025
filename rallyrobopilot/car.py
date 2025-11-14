@@ -676,6 +676,7 @@ class Car(Entity):
                     ],
                     "angle": self.rotation_y,
                     "speed": self.speed,
+                    "position": json.dumps(list(self.position)),
                     "checkpoint": self.checkpoint_handler.next_checkpoint_index
                     if self.checkpoint_handler
                     else 0,
