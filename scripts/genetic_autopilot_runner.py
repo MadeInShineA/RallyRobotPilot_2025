@@ -2,6 +2,7 @@ import sys
 import os
 import lzma
 import pickle
+import json
 import ursina
 from rallyrobopilot import prepare_game_app, RemoteController
 from flask import Flask
@@ -46,13 +47,31 @@ def main():
     track_name = sys.argv[2]
     batch_mode = "--batch" in sys.argv
 
-    # Parse optional replay_file
+    # Parse optional arguments
     replay_file = None
+    initial_angle = None
+    initial_speed = None
+    initial_position = None
+
     args = sys.argv[3:]
     if batch_mode:
         args = args[1:]  # Skip --batch
-    if args:
-        replay_file = args[0]
+
+    i = 0
+    while i < len(args):
+        if args[i] == "--initial_angle":
+            initial_angle = float(args[i+1])
+            i += 2
+        elif args[i] == "--initial_speed":
+            initial_speed = float(args[i+1])
+            i += 2
+        elif args[i] == "--initial_position":
+            initial_position = json.loads(args[i+1])
+            i += 2
+        else:
+            if replay_file is None:
+                replay_file = args[i]
+            i += 1
 
     if not os.path.exists(action_sequences_path):
         print(f"Error: Action sequences file '{action_sequences_path}' not found")
@@ -80,6 +99,14 @@ def main():
 
     # Prepare the game
     app, car = prepare_game_app(track_metadata)
+
+    # Set initial conditions if provided
+    if initial_position:
+        car.position = ursina.Vec3(*initial_position)
+    if initial_angle is not None:
+        car.rotation_y = initial_angle
+    if initial_speed is not None:
+        car.speed = initial_speed
 
     # Set up Flask and remote controller like main.py
     flask_app = Flask(__name__)

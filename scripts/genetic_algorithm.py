@@ -16,6 +16,7 @@ class GeneticAlgorithm:
         track_name: str,
         population_size: int = 50,
         generations: int = 100,
+        segment: int = 0,
         mutation_rate: float = 0.3,
         crossover_rate: float = 0.8,
         replay_file: Optional[str] = None,
@@ -23,6 +24,7 @@ class GeneticAlgorithm:
         self.track_name = track_name
         self.population_size = population_size
         self.generations = generations
+        self.segment = segment
         self.mutation_rate = mutation_rate
         self.crossover_rate = crossover_rate
         self.replay_file = replay_file
@@ -83,21 +85,24 @@ class GeneticAlgorithm:
             return self._initialize_population()
 
     def _initialize_population(self) -> List[List[Tuple[int, int, int, int]]]:
-        """Create initial population by mutating base actions"""
-        # First, try to load recorded keys from the track
-        record_file = f"genetic_data/records/{self.track_name}/complete_record.json"
-        if os.path.exists(record_file):
-            with open(record_file, "r") as f:
+        """Create initial population by mutating base actions from segment"""
+        # Load segment data
+        segment_file = f"genetic_data/records/{self.track_name}/segments/segment_{self.segment}.json"
+        if os.path.exists(segment_file):
+            with open(segment_file, "r") as f:
                 data = json.load(f)
             base_actions = [item["input"] for item in data]
-            print(f"Using recorded inputs from {record_file} as base actions")
+            # Store initial conditions
+            initial = data[0]
+            self.initial_angle = initial["angle"]
+            self.initial_speed = initial["speed"]
+            self.initial_position = json.loads(initial["position"])
+            print(f"Using segment inputs from {segment_file} as base actions")
         else:
-            print(f"No recorded inputs found at {record_file}, using fallback")
+            print(f"No segment file found at {segment_file}")
             exit()
-        population = []
-        for _ in range(self.population_size):
-            mutated = self.mutate_actions(base_actions, self.mutation_rate)
-            population.append(mutated)
+        # First individual is exact base actions, others are mutations
+        population = [base_actions] + [self.mutate_actions(base_actions, self.mutation_rate) for _ in range(self.population_size - 1)]
 
         return population
 
@@ -226,6 +231,9 @@ class GeneticAlgorithm:
                 population_file,
                 self.track_name,
                 "--batch",
+                "--initial_angle", str(self.initial_angle),
+                "--initial_speed", str(self.initial_speed),
+                "--initial_position", json.dumps(self.initial_position),
             ]
             if self.replay_file:
                 cmd.append(self.replay_file)
@@ -290,24 +298,24 @@ class GeneticAlgorithm:
 def main():
     import sys
 
-    if len(sys.argv) < 2:
+    if len(sys.argv) < 5:
         print(
-            "Usage: python genetic_algorithm.py <track_name> [population_size] [generations] [replay_file]"
+            "Usage: python genetic_algorithm.py <track_name> <population_size> <generations> <segment>"
         )
         sys.exit(1)
 
     track_name = sys.argv[1]
-    population_size = int(sys.argv[2]) if len(sys.argv) > 2 else 50
-    generations = int(sys.argv[3]) if len(sys.argv) > 3 else 100
-    replay_file = sys.argv[4] if len(sys.argv) > 4 else None
-    mutation_rate = 0
+    population_size = int(sys.argv[2])
+    generations = int(sys.argv[3])
+    segment = int(sys.argv[4])
+    mutation_rate = 0.3
 
     ga = GeneticAlgorithm(
         track_name,
         population_size,
         generations,
+        segment=segment,
         mutation_rate=mutation_rate,
-        replay_file=replay_file,
     )
     ga.run_evolution()
 
