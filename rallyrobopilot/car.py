@@ -1,4 +1,5 @@
 import timeit
+import time as real_time
 
 import setuptools
 from ursina import *
@@ -205,6 +206,8 @@ class Car(Entity):
         self.recording = False
         self.recorded_keys = []
         self.frame_idx = 0
+        self.recording_start_time = 0.0
+        self.last_real_time = real_time.time()
 
         # Checkpoint mode
         self.checkpoint_mode = False
@@ -383,6 +386,9 @@ class Car(Entity):
     def update(self):
         FPS = 15
         time.dt = 1 / FPS
+        dt_real = real_time.time() - self.last_real_time
+        self.count += dt_real
+        self.last_real_time = real_time.time()
         # Exit if esc pressed.
         if held_keys["escape"]:
             quit()
@@ -451,6 +457,7 @@ class Car(Entity):
             self.recording = not self.recording
             if self.recording:
                 self.recorded_keys = []
+                self.recording_start_time = real_time.time()
                 print("Recording started")
             else:
                 print("Recording stopped")
@@ -660,7 +667,7 @@ class Car(Entity):
             self.recorded_keys.append(
                 {
                     "idx": self.frame_idx,
-                    "time": self.count,
+                    "time": real_time.time() - self.recording_start_time,
                     "input": [
                         int(held_keys["w"] or held_keys["up arrow"]),  # forward
                         int(held_keys["s"] or held_keys["down arrow"]),  # backward
