@@ -85,31 +85,15 @@ class GeneticAlgorithm:
     def _initialize_population(self) -> List[List[Tuple[int, int, int, int]]]:
         """Create initial population by mutating base actions"""
         # First, try to load recorded keys from the track
-        record_file = f"genetic_data/records/{self.track_name}/record_keys.json"
+        record_file = f"genetic_data/records/{self.track_name}/record.json"
         if os.path.exists(record_file):
             with open(record_file, "r") as f:
-                base_actions = json.load(f)
+                data = json.load(f)
+            base_actions = [item["input"] for item in data]
             print(f"Using recorded inputs from {record_file} as base actions")
         else:
             print(f"No recorded inputs found at {record_file}, using fallback")
-            if self.replay_file:
-                # Load base actions from replay file
-                base_actions, _, _ = self.load_replay_data(self.replay_file)
-
-                # Save base actions for future use
-                os.makedirs("genetic_data", exist_ok=True)
-                with open("genetic_data/base_actions.json", "w") as f:
-                    json.dump(base_actions, f)
-            else:
-                # Try to load existing base actions
-                base_actions_file = "genetic_data/base_actions.json"
-                if os.path.exists(base_actions_file):
-                    with open(base_actions_file, "r") as f:
-                        base_actions = json.load(f)
-                else:
-                    # Create default base actions (straight driving)
-                    base_actions = [(1, 0, 0, 0)] * 100  # Forward for 100 steps
-
+            exit()
         population = []
         for _ in range(self.population_size):
             mutated = self.mutate_actions(base_actions, self.mutation_rate)
@@ -316,7 +300,7 @@ def main():
     population_size = int(sys.argv[2]) if len(sys.argv) > 2 else 50
     generations = int(sys.argv[3]) if len(sys.argv) > 3 else 100
     replay_file = sys.argv[4] if len(sys.argv) > 4 else None
-    mutation_rate = 0.0
+    mutation_rate = 0
 
     ga = GeneticAlgorithm(
         track_name,

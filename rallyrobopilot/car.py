@@ -204,6 +204,7 @@ class Car(Entity):
         # Recording
         self.recording = False
         self.recorded_keys = []
+        self.frame_idx = 0
 
         # Checkpoint mode
         self.checkpoint_mode = False
@@ -457,7 +458,7 @@ class Car(Entity):
                 trackname = self.track.track_name if self.track else "unknown"
                 path = f"genetic_data/records/{trackname}/"
                 os.makedirs(path, exist_ok=True)
-                with open(f"{path}record_keys.json", "w") as f:
+                with open(f"{path}record.json", "w") as f:
                     json.dump(self.recorded_keys, f)
         elif not held_keys["r"]:
             self.r_pressed = False
@@ -638,13 +639,23 @@ class Car(Entity):
         # Record keys if recording
         if self.recording:
             self.recorded_keys.append(
-                [
-                    int(held_keys["w"] or held_keys["up arrow"]),  # forward
-                    int(held_keys["s"] or held_keys["down arrow"]),  # backward
-                    int(held_keys["a"] or held_keys["left arrow"]),  # left
-                    int(held_keys["d"] or held_keys["right arrow"]),  # right
-                ]
+                {
+                    "idx": self.frame_idx,
+                    "time": self.count,
+                    "input": [
+                        int(held_keys["w"] or held_keys["up arrow"]),  # forward
+                        int(held_keys["s"] or held_keys["down arrow"]),  # backward
+                        int(held_keys["a"] or held_keys["left arrow"]),  # left
+                        int(held_keys["d"] or held_keys["right arrow"]),  # right
+                    ],
+                    "angle": self.rotation_y,
+                    "speed": self.speed,
+                    "checkpoint": self.checkpoint_handler.next_checkpoint_index
+                    if self.checkpoint_handler
+                    else 0,
+                }
             )
+            self.frame_idx += 1
 
     def reset_car(self):
         """
