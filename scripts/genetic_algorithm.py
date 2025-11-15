@@ -403,7 +403,7 @@ class GeneticAlgorithm:
 
         collision_penalty = collision_counter * 10.0
 
-        fitness = base_fitness + collision_penalty + inputs_to_finish_segment
+        fitness = base_fitness + collision_penalty + (inputs_to_finish_segment * 20)
         return fitness
 
     def _evaluate_population_in_game(self, generation: int) -> List[float]:
@@ -1184,7 +1184,9 @@ class GeneticAlgorithm:
             for bar, count in zip(bars, collision_counts):
                 ax4.text(
                     bar.get_x() + bar.get_width() / 2,
-                    bar.get_height() + max(collision_counts) * 0.02 if collision_counts else 0.1,
+                    bar.get_height() + max(collision_counts) * 0.02
+                    if collision_counts
+                    else 0.1,
                     str(count),
                     ha="center",
                     va="bottom",
