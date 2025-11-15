@@ -211,6 +211,12 @@ class Car(Entity):
         self.recording_start_time = 0.0
         self.last_real_time = real_time.time()
 
+        # Genetic attributes
+        self.is_genetic_car = False
+        self.genetic_generation = 0
+        self.genetic_individual = 0
+        self.genetic_segment = 0
+
         # Checkpoint mode
         self.checkpoint_mode = False
         self.mode_text = Text(
@@ -238,6 +244,10 @@ class Car(Entity):
         # Disable rays by default
         if self.multiray_sensor:
             self.multiray_sensor.set_enabled_rays(False)
+
+        # Start recording if genetic car
+        if self.is_genetic_car:
+            self.start_record()
 
     def sports_car(self):
         self.car_type = "sports"
@@ -456,44 +466,10 @@ class Car(Entity):
         # Recording toggle
         if held_keys["r"] and not self.r_pressed:
             self.r_pressed = True
-            self.recording = not self.recording
-            if self.recording:
-                trackname = self.track.track_name if self.track else "unknown"
-                path = f"genetic_data/records/{trackname}/"
-                if os.path.exists(path):
-                    shutil.rmtree(path)
-                    print(f"Cleared old records in {path}")
-                os.makedirs(path, exist_ok=True)
-                self.recorded_frames = []
-                self.recording_start_time = real_time.time()
-                print("Recording started")
+            if not self.recording:
+                self.start_record()
             else:
-                print("Recording stopped")
-                # Save recorded data
-                trackname = self.track.track_name if self.track else "unknown"
-                path = f"genetic_data/records/{trackname}/"
-                complete_path = f"{path}complete_record.json"
-                with open(complete_path, "w") as f:
-                    json.dump(self.recorded_frames, f)
-                print(f"Complete record saved to {complete_path}")
-
-                # Split into segments (only from first lap)
-                segments_path = f"{path}segments/"
-                os.makedirs(segments_path, exist_ok=True)
-                from collections import defaultdict
-
-                checkpoint_to_frames = defaultdict(list)
-                for frame in self.recorded_frames:
-                    if frame.get("lap", -1) == 0:  # Only first lap
-                        cp = frame["checkpoint"]
-                        checkpoint_to_frames[cp].append(frame)
-                segments = sorted(checkpoint_to_frames.keys())
-                for i, cp in enumerate(segments):
-                    segment_data = checkpoint_to_frames[cp]
-                    segment_file = f"{segments_path}segment_{i}.json"
-                    with open(segment_file, "w") as f:
-                        json.dump(segment_data, f)
-                    print(f"Segment {i} (checkpoint {cp}) saved to {segment_file}")
+                self.stop_record()
         elif not held_keys["r"]:
             self.r_pressed = False
 
@@ -674,38 +650,7 @@ class Car(Entity):
 
         # Record keys if recording
         if self.recording:
-            self.recorded_frames.append(
-                {
-                    "idx": self.frame_idx,
-                    "time": real_time.time() - self.recording_start_time,
-                    "input": [
-                        int(held_keys["w"] or held_keys["up arrow"]),  # forward
-                        int(held_keys["s"] or held_keys["down arrow"]),  # backward
-                        int(held_keys["a"] or held_keys["left arrow"]),  # left
-                        int(held_keys["d"] or held_keys["right arrow"]),  # right
-                    ],
-                    "angle": self.rotation_y,
-                    "speed": self.speed,
-                    "position": json.dumps(list(self.position)),
-                    "checkpoint": (
-                        -1
-                        if self.checkpoint_handler
-                        and len(self.checkpoint_handler.passed_checkpoints) == 0
-                        else self.checkpoint_handler.next_checkpoint_index - 1
-                        if self.checkpoint_handler
-                        else -1
-                    ),
-                    "lap": (
-                        -1
-                        if self.checkpoint_handler
-                        and len(self.checkpoint_handler.passed_checkpoints) == 0
-                        else self.checkpoint_handler.current_lap
-                        if self.checkpoint_handler
-                        else -1
-                    ),
-                }
-            )
-            self.frame_idx += 1
+            self.save_frame()
 
     def reset_car(self):
         """
@@ -767,6 +712,104 @@ class Car(Entity):
         Resets the collision counter
         """
         self.collision_counter = 0
+
+    def start_record(self):
+        """
+        Starts recording manual records
+        """
+        self.recording = True
+        trackname = self.track.track_name if self.track else "unknown"
+        path = f"genetic_data/records/{trackname}/"
+        # Never clear genetic_data/records to preserve data for GA initialization
+        os.makedirs(path, exist_ok=True)
+        self.recorded_frames = []
+        self.frame_idx = 0
+        self.recording_start_time = real_time.time()
+        print("Recording started")
+
+    def stop_record(self):
+        """
+        Stops recording and saves the records
+        """
+        self.recording = False
+        print("Recording stopped")
+        print(f"is_genetic_car: {self.is_genetic_car}, recorded_frames: {len(self.recorded_frames)}")
+        if self.is_genetic_car:
+            print(f"Genetic attributes: gen={self.genetic_generation}, ind={self.genetic_individual}, seg={self.genetic_segment}")
+            # Save to genetic path
+            dir_path = f"genetic_data/populations/{self.track.track_name if self.track else 'unknown'}/segment_{self.genetic_segment}/generation_{self.genetic_generation}"
+            os.makedirs(dir_path, exist_ok=True)
+            file_path = f"{dir_path}/individual_{self.genetic_individual}.json"
+            with open(file_path, "w") as f:
+                json.dump(self.recorded_frames, f)
+            print(
+                f"Genetic individual {self.genetic_individual} record saved to {file_path}"
+            )
+        else:
+            # Save recorded data
+            trackname = self.track.track_name if self.track else "unknown"
+            path = f"genetic_data/records/{trackname}/"
+            complete_path = f"{path}complete_record.json"
+            with open(complete_path, "w") as f:
+                json.dump(self.recorded_frames, f)
+            print(f"Complete record saved to {complete_path}")
+
+            # Split into segments (only from first lap)
+            segments_path = f"{path}segments/"
+            os.makedirs(segments_path, exist_ok=True)
+            from collections import defaultdict
+
+            checkpoint_to_frames = defaultdict(list)
+            for frame in self.recorded_frames:
+                if frame.get("lap", -1) == 0:  # Only first lap
+                    cp = frame["checkpoint"]
+                    checkpoint_to_frames[cp].append(frame)
+            segments = sorted(checkpoint_to_frames.keys())
+            for i, cp in enumerate(segments):
+                segment_data = checkpoint_to_frames[cp]
+                segment_file = f"{segments_path}segment_{i}.json"
+                with open(segment_file, "w") as f:
+                    json.dump(segment_data, f)
+                print(f"Segment {i} (checkpoint {cp}) saved to {segment_file}")
+
+    def save_frame(self):
+        """
+        Saves the current frame to recorded_frames if recording is active
+        """
+        if not self.recording:
+            return
+        self.recorded_frames.append(
+            {
+                "idx": self.frame_idx,
+                "time": real_time.time() - self.recording_start_time,
+                "input": [
+                    int(held_keys["w"] or held_keys["up arrow"]),  # forward
+                    int(held_keys["s"] or held_keys["down arrow"]),  # backward
+                    int(held_keys["a"] or held_keys["left arrow"]),  # left
+                    int(held_keys["d"] or held_keys["right arrow"]),  # right
+                ],
+                "angle": self.rotation_y,
+                "speed": self.speed,
+                "position": json.dumps(list(self.position)),
+                "checkpoint": (
+                    -1
+                    if self.checkpoint_handler
+                    and len(self.checkpoint_handler.passed_checkpoints) == 0
+                    else self.checkpoint_handler.next_checkpoint_index - 1
+                    if self.checkpoint_handler
+                    else -1
+                ),
+                "lap": (
+                    -1
+                    if self.checkpoint_handler
+                    and len(self.checkpoint_handler.passed_checkpoints) == 0
+                    else self.checkpoint_handler.current_lap
+                    if self.checkpoint_handler
+                    else -1
+                ),
+            }
+        )
+        self.frame_idx += 1
 
     def animate_text(self, text, top=1.2, bottom=0.6):
         """

@@ -14,11 +14,11 @@ class GeneticAutopilot:
         self,
         action_sequence: List[Tuple[int, int, int, int]],
         segment: int,
-        max_time: float = 5.0,
+        car=None,
     ):
         self.action_sequence = action_sequence
         self.segment = segment
-        self.max_time = max_time
+        self.car = car
         self.current_action_index = 0
         self.start_time = 0.0
         self.is_running = False
@@ -28,12 +28,6 @@ class GeneticAutopilot:
         self.collision_counter = 0
         self.segment_completed = False
         self.positions = []
-
-        # Recording
-        self.recording = False
-        self.recorded_frames = []
-        self.frame_idx = 0
-        self.recording_start_time = 0.0
 
         print(
             f"Starting genetic autopilot evaluation with {len(self.action_sequence)} actions"
@@ -50,28 +44,26 @@ class GeneticAutopilot:
         self.positions = []
 
         # Start recording
-        self.recording = True
-        self.recorded_frames = []
-        self.frame_idx = 0
-        self.recording_start_time = time.time()
+        if self.car:
+            self.car.start_record()
 
     def stop_evaluation(self):
         """Stop the evaluation and return results"""
         self.total_time = time.time() - self.start_time
         self.is_running = False
 
-        self.inputs_to_finish_segment = (
-            self.current_action_index
-            if self.segment_completed
-            else len(self.action_sequence)
-        )
+        self.inputs_to_finish_segment = self.current_action_index
+
+        # Stop recording
+        if self.car:
+            self.car.stop_record()
 
         results = {
             "collision_counter": self.collision_counter,
             "segment_completed": self.segment_completed,
             "inputs_to_finish_segment": self.inputs_to_finish_segment,
             "positions": self.positions,
-            "recorded_frames": self.recorded_frames,
+            "recorded_frames": self.car.recorded_frames if self.car else [],
         }
 
         return results
@@ -85,34 +77,6 @@ class GeneticAutopilot:
 
         # Record position
         self.positions.append(tuple(sensing_data.car_position))
-
-        # Record frame data if recording
-        if self.recording:
-            self.recorded_frames.append(
-                {
-                    "idx": self.frame_idx,
-                    "time": time.time() - self.recording_start_time,
-                    "input": [
-                        int(sensing_data.current_controls[0]),  # forward
-                        int(sensing_data.current_controls[1]),  # backward
-                        int(sensing_data.current_controls[2]),  # left
-                        int(sensing_data.current_controls[3]),  # right
-                    ],
-                    "angle": sensing_data.car_angle,
-                    "speed": sensing_data.car_speed,
-                    "position": json.dumps(list(sensing_data.car_position)),
-                    "checkpoint": sensing_data.checkpoints_passed - 1
-                    if sensing_data.checkpoints_passed > 0
-                    else -1,
-                    "lap": 0,  # Always first lap for segments
-                }
-            )
-            self.frame_idx += 1
-
-        # Check timeout
-        if time.time() - self.start_time > self.max_time:
-            self.stop_evaluation()
-            return
 
         # Get collision count from car
         self.collision_counter = sensing_data.collision_counter
@@ -189,7 +153,8 @@ class GeneticMsgProcessor:
             self.autopilots = self.load_genetic_autopilots(action_sequences_path)
         elif action_sequences:
             self.autopilots = [
-                GeneticAutopilot(seq, self.segment) for seq in action_sequences
+                GeneticAutopilot(seq, self.segment, car=self.car)
+                for seq in action_sequences
             ]
         else:
             raise ValueError(
@@ -208,7 +173,10 @@ class GeneticMsgProcessor:
         with open(action_sequences_path, "r") as f:
             action_sequences = json.load(f)
 
-        return [GeneticAutopilot(seq, self.segment) for seq in action_sequences]
+        return [
+            GeneticAutopilot(seq, self.segment, car=self.car)
+            for seq in action_sequences
+        ]
 
     def load_single_autopilot(self, action_sequence_path: str) -> GeneticAutopilot:
         """Load a single genetic autopilot from a JSON file containing action sequences"""
@@ -220,13 +188,15 @@ class GeneticMsgProcessor:
         with open(action_sequence_path, "r") as f:
             action_sequence = json.load(f)
 
-        return GeneticAutopilot(action_sequence, self.segment)
+        return GeneticAutopilot(action_sequence, self.segment, car=self.car)
 
     def start_evaluation(self):
         """Start the genetic evaluation for all autopilots"""
         self.current_autopilot_index = 0
         self.results = []
         if self.autopilots:
+            for a in self.autopilots:
+                a.car = self.car
             self.autopilots[0].start_evaluation()
             self._reset_car_for_individual(0)
 
@@ -250,11 +220,6 @@ class GeneticMsgProcessor:
             )
             print(json.dumps(results["positions"]))
 
-            # Save recorded frames
-            self._save_individual_record(
-                self.current_autopilot_index, results["recorded_frames"]
-            )
-
             self.current_autopilot_index += 1
             if self.current_autopilot_index < len(self.autopilots):
                 print(f"Switching to individual {self.current_autopilot_index}")
@@ -267,6 +232,14 @@ class GeneticMsgProcessor:
         """Reset the car to initial conditions for a new individual"""
         if not self.car:
             return
+        # Set genetic attributes
+        self.car.is_genetic_car = True
+        self.car.genetic_generation = self.generation
+        self.car.genetic_individual = idx
+        self.car.genetic_segment = self.segment
+        print(
+            f"Set genetic car attributes: gen={self.generation}, ind={idx}, seg={self.segment}"
+        )
         if self.initial_position:
             self.car.position = ursina.Vec3(*self.initial_position)
         if self.initial_angle is not None:
@@ -295,22 +268,6 @@ class GeneticMsgProcessor:
                     entity_data["passed"] = False
                     entity_data["entity"].color = ursina.color.green
                     entity_data["text"].color = ursina.color.yellow
-
-    def _save_individual_record(self, individual_idx: int, recorded_frames: list):
-        """Save recorded frames for an individual to the specified file"""
-        if not self.track_name or recorded_frames is None:
-            return
-
-        # Create directory: genetic_data/populations/track_name/segment_x/generation_y
-        dir_path = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/generation_{self.generation}"
-        os.makedirs(dir_path, exist_ok=True)
-
-        # Save recorded frames to individual_z.json
-        file_path = f"{dir_path}/individual_{individual_idx}.json"
-        with open(file_path, "w") as f:
-            json.dump(recorded_frames, f)
-
-        print(f"Individual {individual_idx} record saved to {file_path}")
 
     @property
     def is_running(self):
@@ -370,13 +327,6 @@ class GeneticMsgProcessor:
             print(
                 f"INDIVIDUAL {self.current_autopilot_index} RESULTS: {results['collision_counter']} {results['segment_completed']} {results['inputs_to_finish_segment']}"
             )
-
-            # Save recorded frames
-            recorded_frames = results.get("recorded_frames", [])
-            if recorded_frames:
-                self._save_individual_record(
-                    self.current_autopilot_index, recorded_frames
-                )
 
             self.current_autopilot_index += 1
             if self.current_autopilot_index < len(self.autopilots):
