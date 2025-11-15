@@ -6,6 +6,7 @@ import pickle
 import subprocess
 import tempfile
 from typing import List, Tuple, Optional
+import matplotlib.pyplot as plt
 
 
 class GeneticAlgorithm:
@@ -29,9 +30,19 @@ class GeneticAlgorithm:
         self.crossover_rate = crossover_rate
         self.replay_file = replay_file
 
+        # Load checkpoints
+        self.checkpoints = []
+        checkpoints_path = f"assets/{self.track_name}/checkpoints.json"
+        if os.path.exists(checkpoints_path):
+            with open(checkpoints_path) as f:
+                self.checkpoints = json.load(f)
+        else:
+            print(f"Warning: checkpoints.json not found at {checkpoints_path}")
+
         # Load or initialize population
         self.population = self._load_population()
         self.fitness_scores = []
+        self.individual_positions = []
 
         # Track best individual
         self.best_individual = None
@@ -97,14 +108,19 @@ class GeneticAlgorithm:
             self.initial_angle = initial["angle"]
             self.initial_speed = initial["speed"]
             self.initial_position = json.loads(initial["position"])
+            self.original_positions = [json.loads(item["position"]) for item in data]
             print(f"Using segment inputs from {segment_file} as base actions")
         else:
             print(f"No segment file found at {segment_file}")
             exit()
-        # First individual is exact base actions, others are mutations
-        population = [base_actions] + [
-            self.mutate_actions(base_actions, self.mutation_rate)
-            for _ in range(self.population_size - 1)
+        # Extend base actions to 1.5 times length with [0, 0, 0, 0]
+        len_base = len(base_actions)
+        extended_len = int(len_base * 1.5)
+        extended_actions = base_actions + [[0, 0, 0, 0]] * (extended_len - len_base)
+        # All individuals are mutations of extended actions
+        population = [
+            self.mutate_actions(extended_actions, self.mutation_rate)
+            for _ in range(self.population_size)
         ]
 
         return population
@@ -210,6 +226,67 @@ class GeneticAlgorithm:
 
             print(".2f")
 
+            # Plot trajectories
+            if (
+                hasattr(self, "original_positions")
+                and self.original_positions
+                and self.individual_positions
+            ):
+                best_idx = self.fitness_scores.index(min(self.fitness_scores))
+                print(
+                    f"Debug: Plotting gen {generation + 1}, individual_positions len: {len(self.individual_positions)}, best_idx: {best_idx}"
+                )
+                for i, pos in enumerate(self.individual_positions):
+                    print(f"  Individual {i}: positions len {len(pos)}")
+                plt.figure()
+                # Plot all individual trajectories in light gray
+                for i, positions in enumerate(self.individual_positions):
+                    if positions:
+                        x = [p[0] for p in positions]
+                        z = [p[2] for p in positions]
+                        plt.plot(x, z, color="gray", alpha=0.3, linewidth=0.5)
+                # Plot best trajectory in red dashed
+                best_positions = (
+                    self.individual_positions[best_idx]
+                    if best_idx < len(self.individual_positions)
+                    and self.individual_positions[best_idx]
+                    else []
+                )
+                print(f"Debug: best_positions len: {len(best_positions)}")
+                if best_positions:
+                    x_best = [p[0] for p in best_positions]
+                    z_best = [p[2] for p in best_positions]
+                    plt.plot(
+                        x_best,
+                        z_best,
+                        color="red",
+                        linewidth=2,
+                        linestyle="--",
+                        label=f"Best Gen {generation + 1}",
+                    )
+                # Plot original trajectory in blue solid
+                x_orig = [p[0] for p in self.original_positions]
+                z_orig = [p[2] for p in self.original_positions]
+                plt.plot(
+                    x_orig,
+                    z_orig,
+                    color="blue",
+                    linewidth=2,
+                    label="Original Trajectory",
+                )
+                plt.xlabel("X")
+                plt.ylabel("Z")
+                plt.title(f"All Trajectories - Gen {generation + 1}")
+                plt.legend()
+                graph_dir = f"genetic_data/populations/{self.track_name}/graphs"
+                os.makedirs(graph_dir, exist_ok=True)
+                graph_path = (
+                    f"{graph_dir}/segment_{self.segment}_gen_{generation + 1}.png"
+                )
+                plt.savefig(graph_path)
+                plt.close()
+                print(f"Trajectories saved to {graph_path}")
+
             # Evolve to next generation (except for last generation)
             if generation < self.generations - 1:
                 self._evolve_population()
@@ -223,14 +300,16 @@ class GeneticAlgorithm:
         wall_hits: int,
         segment_completed: bool,
         inputs_to_finish_segment: int,
+        distance_to_next: float,
     ) -> float:
         """Calculate fitness score from evaluation results"""
-        # Example fitness function: minimize inputs, penalize wall hits, reward completion
-        base_fitness = inputs_to_finish_segment if segment_completed else 1000.0
-        wall_penalty = wall_hits * 10.0  # Adjust penalty as needed
-        completion_bonus = 50.0 if segment_completed else 0.0  # Adjust bonus as needed
+        # Reward closeness to next checkpoint, bonus for completion
+        base_fitness = distance_to_next
+        if segment_completed:
+            base_fitness -= 1000.0  # bonus for completing
+        wall_penalty = wall_hits * 10.0
 
-        fitness = base_fitness + wall_penalty - completion_bonus
+        fitness = base_fitness + wall_penalty
         return fitness
 
     def _evaluate_population_in_game(self) -> List[float]:
@@ -274,8 +353,11 @@ class GeneticAlgorithm:
             # The genetic_autopilot_runner should output results
             lines = result.stdout.strip().split("\n")
             fitness_dict = {}
+            self.individual_positions = [[] for _ in range(len(self.population))]
 
-            for line in lines:
+            i = 0
+            while i < len(lines):
+                line = lines[i]
                 if line.startswith("INDIVIDUAL") and "RESULTS:" in line:
                     parts = line.split()
                     try:
@@ -288,13 +370,42 @@ class GeneticAlgorithm:
                         segment_completed = results_parts[1].lower() == "true"
                         inputs_to_finish_segment = int(results_parts[2])
 
+                        # Next line should be positions JSON
+                        positions = []
+                        if i + 1 < len(lines):
+                            try:
+                                positions = json.loads(lines[i + 1])
+                                i += 1  # Skip the positions line
+                            except json.JSONDecodeError:
+                                pass
+
+                        # Compute distance to next checkpoint
+                        distance = 1000.0
+                        if positions:
+                            last_pos = positions[-1]
+                            next_cp_idx = self.segment + 1
+                            if next_cp_idx < len(self.checkpoints):
+                                next_cp = self.checkpoints[next_cp_idx]["position"]
+                                distance = (
+                                    (last_pos[0] - next_cp[0]) ** 2
+                                    + (last_pos[2] - next_cp[2]) ** 2
+                                ) ** 0.5
+
                         fitness_score = self.calculate_fitness(
-                            wall_hits, segment_completed, inputs_to_finish_segment
+                            wall_hits,
+                            segment_completed,
+                            inputs_to_finish_segment,
+                            distance,
                         )
                         fitness_dict[idx] = fitness_score
-                        print(f"Individual {idx}: wall_hits={wall_hits}, segment_completed={segment_completed}, inputs_to_finish_segment={inputs_to_finish_segment}, fitness={fitness_score:.2f}")
+
+                        self.individual_positions[idx] = positions
+                        print(
+                            f"Individual {idx}: wall_hits={wall_hits}, segment_completed={segment_completed}, inputs_to_finish_segment={inputs_to_finish_segment}, distance={distance:.2f}, fitness={fitness_score:.2f}"
+                        )
                     except (ValueError, IndexError):
-                        continue
+                        pass
+                i += 1
 
             # Build fitness_scores list, defaulting to high penalty
             fitness_scores = [
@@ -340,8 +451,8 @@ def main():
     population_size = int(sys.argv[2])
     generations = int(sys.argv[3])
     segment = int(sys.argv[4])
-    mutation_rate = 0.0
-    crossover_rate = 0.0
+    mutation_rate = 0.1
+    crossover_rate = 0.3
 
     ga = GeneticAlgorithm(
         track_name,

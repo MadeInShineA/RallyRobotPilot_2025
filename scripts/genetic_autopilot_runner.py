@@ -95,6 +95,7 @@ def main():
             initial_position=initial_position,
             initial_angle=initial_angle,
             initial_speed=initial_speed,
+            track_name=track_name,
         )
         print(f"Loaded {len(genetic_processor.autopilots)} genetic autopilots")
     except Exception as e:

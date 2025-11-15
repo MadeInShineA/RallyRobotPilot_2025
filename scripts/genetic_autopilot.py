@@ -27,6 +27,7 @@ class GeneticAutopilot:
         # Fitness tracking
         self.wall_hits = 0
         self.segment_completed = False
+        self.positions = []
 
         print(
             f"Starting genetic autopilot evaluation with {len(self.action_sequence)} actions"
@@ -40,6 +41,7 @@ class GeneticAutopilot:
         self.frame_counter = 0
         self.wall_hits = 0
         self.segment_completed = False
+        self.positions = []
 
     def stop_evaluation(self):
         """Stop the evaluation and return results"""
@@ -56,6 +58,7 @@ class GeneticAutopilot:
             "wall_hits": self.wall_hits,
             "segment_completed": self.segment_completed,
             "inputs_to_finish_segment": self.inputs_to_finish_segment,
+            "positions": self.positions,
         }
 
         return results
@@ -66,6 +69,9 @@ class GeneticAutopilot:
             return
 
         self.frame_counter += 1
+
+        # Record position
+        self.positions.append(tuple(sensing_data.car_position))
 
         # Check timeout
         if time.time() - self.start_time > self.max_time:
@@ -154,6 +160,7 @@ class GeneticMsgProcessor:
         initial_position: Optional[List[float]] = None,
         initial_angle: Optional[float] = None,
         initial_speed: Optional[float] = None,
+        track_name: str = "",
     ):
         self.current_autopilot_index = 0
         self.results = []
@@ -162,6 +169,7 @@ class GeneticMsgProcessor:
         self.initial_position = initial_position
         self.initial_angle = initial_angle
         self.initial_speed = initial_speed
+        self.track_name = track_name
         self.car = None
         if action_sequences_path:
             self.autopilots = self.load_genetic_autopilots(action_sequences_path)
@@ -224,6 +232,7 @@ class GeneticMsgProcessor:
             print(
                 f"INDIVIDUAL {self.current_autopilot_index} RESULTS: {results['wall_hits']} {results['segment_completed']} {results['inputs_to_finish_segment']}"
             )
+            print(json.dumps(results['positions']))
             self.current_autopilot_index += 1
             if self.current_autopilot_index < len(self.autopilots):
                 print(f"Switching to individual {self.current_autopilot_index}")
