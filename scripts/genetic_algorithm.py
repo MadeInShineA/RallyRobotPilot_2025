@@ -6,6 +6,7 @@ import pickle
 import subprocess
 import tempfile
 import math
+import shutil
 from typing import List, Tuple, Optional
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
@@ -305,6 +306,12 @@ class GeneticAlgorithm:
             f"Starting GA for {self.track_name} with population size {self.population_size}"
         )
         print("This GA will automatically launch the game to evaluate fitness!")
+
+        # Clear previous results for this segment
+        segment_dir = f"genetic_data/populations/{self.track_name}/segment_{self.segment}"
+        if os.path.exists(segment_dir):
+            shutil.rmtree(segment_dir)
+            print(f"Cleared previous results in {segment_dir}")
 
         for generation in range(self.generations):
             print(f"\nGeneration {generation + 1}/{self.generations}")
@@ -1154,17 +1161,17 @@ class GeneticAlgorithm:
 
         # Overall title
         fig.suptitle(
-            f"Genetic Algorithm Analysis - Segment {self.segment} - {self.track_name}",
+            f"Genetic Algorithm Summary - Segment {self.segment} - {self.track_name}",
             fontsize=16,
             fontweight="bold",
             y=0.98,
         )
 
         # Save the combined figure
-        graph_path = f"{graph_dir}/analysis.png"
+        graph_path = f"{graph_dir}/summary.png"
         plt.savefig(graph_path, dpi=150, bbox_inches="tight")
         plt.close()
-        print(f"Combined analysis graph saved to {graph_path}")
+        print(f"Combined summary graph saved to {graph_path}")
 
 
 def main():

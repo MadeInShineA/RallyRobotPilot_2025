@@ -1,5 +1,6 @@
 import timeit
 import time as real_time
+import shutil
 
 import setuptools
 from ursina import *
@@ -456,6 +457,12 @@ class Car(Entity):
             self.r_pressed = True
             self.recording = not self.recording
             if self.recording:
+                trackname = self.track.track_name if self.track else "unknown"
+                path = f"genetic_data/records/{trackname}/"
+                if os.path.exists(path):
+                    shutil.rmtree(path)
+                    print(f"Cleared old records in {path}")
+                os.makedirs(path, exist_ok=True)
                 self.recorded_frames = []
                 self.recording_start_time = real_time.time()
                 print("Recording started")
@@ -464,7 +471,6 @@ class Car(Entity):
                 # Save recorded data
                 trackname = self.track.track_name if self.track else "unknown"
                 path = f"genetic_data/records/{trackname}/"
-                os.makedirs(path, exist_ok=True)
                 complete_path = f"{path}complete_record.json"
                 with open(complete_path, "w") as f:
                     json.dump(self.recorded_frames, f)
