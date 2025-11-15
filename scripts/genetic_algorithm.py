@@ -946,12 +946,11 @@ class GeneticAlgorithm:
         fig = plt.figure(figsize=(16, 12))
 
         # Create subplot grid: 2 rows, 2 columns
-        # Top row: trajectory (spans both columns)
-        # Bottom row: completion and frames
         gs = fig.add_gridspec(2, 2, hspace=0.3, wspace=0.3)
-        ax1 = fig.add_subplot(gs[0, :])  # Trajectory - full width
-        ax2 = fig.add_subplot(gs[1, 0])  # Completion status
-        ax3 = fig.add_subplot(gs[1, 1])  # Frames comparison
+        ax1 = fig.add_subplot(gs[0, 0])  # Trajectory
+        ax2 = fig.add_subplot(gs[0, 1])  # Completion status
+        ax3 = fig.add_subplot(gs[1, 0])  # Frames comparison
+        ax4 = fig.add_subplot(gs[1, 1])  # Collision count
 
         # 1. Trajectory subplot (with all individuals)
         # Plot all individual trajectories in light gray
@@ -1158,6 +1157,58 @@ class GeneticAlgorithm:
                 "Frames vs Initial\n(Completed Only)", fontsize=12, fontweight="bold"
             )
             ax3.grid(True, alpha=0.3, axis="y")
+
+        # 4. Collision count per individual
+        individual_ids = [f"Ind {i}" for i in range(len(self.individual_stats))]
+        collision_counts = [
+            self.individual_stats[i]["collision_counter"]
+            for i in range(len(self.individual_stats))
+        ]
+
+        if collision_counts:  # Plot collision counts for all individuals
+            bars = ax4.bar(individual_ids, collision_counts, color="red", alpha=0.7)
+
+            ax4.set_xlabel("Individual", fontsize=11)
+            ax4.set_ylabel("Collision Count", fontsize=11)
+            ax4.set_title(
+                "Collision Count per Individual", fontsize=12, fontweight="bold"
+            )
+
+            # Set y-axis to show only integers
+            if collision_counts:
+                y_max = max(collision_counts)
+                ax4.set_ylim(bottom=0, top=y_max + 1)
+                ax4.set_yticks(range(0, y_max + 2))
+
+            # Add value labels on bars
+            for bar, count in zip(bars, collision_counts):
+                ax4.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    bar.get_height() + max(collision_counts) * 0.02 if collision_counts else 0.1,
+                    str(count),
+                    ha="center",
+                    va="bottom",
+                    fontsize=8,
+                )
+
+            ax4.tick_params(axis="x", rotation=45)
+            ax4.grid(True, alpha=0.3, axis="y")
+        else:
+            # No collision data
+            ax4.text(
+                0.5,
+                0.5,
+                "No collision\ndata available",
+                ha="center",
+                va="center",
+                transform=ax4.transAxes,
+                fontsize=12,
+                color="gray",
+            )
+            ax4.set_title(
+                "Collision Count per Individual", fontsize=12, fontweight="bold"
+            )
+            ax4.grid(True, alpha=0.3, axis="y")
 
         # Overall title
         fig.suptitle(
