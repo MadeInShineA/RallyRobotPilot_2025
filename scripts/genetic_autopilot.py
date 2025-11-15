@@ -25,7 +25,7 @@ class GeneticAutopilot:
         self.frame_counter = 0
 
         # Fitness tracking
-        self.wall_hits = 0
+        self.collision_counter = 0
         self.segment_completed = False
         self.positions = []
 
@@ -45,7 +45,7 @@ class GeneticAutopilot:
         self.is_running = True
         self.current_action_index = 0
         self.frame_counter = 0
-        self.wall_hits = 0
+        self.collision_counter = 0
         self.segment_completed = False
         self.positions = []
 
@@ -67,7 +67,7 @@ class GeneticAutopilot:
         )
 
         results = {
-            "wall_hits": self.wall_hits,
+            "collision_counter": self.collision_counter,
             "segment_completed": self.segment_completed,
             "inputs_to_finish_segment": self.inputs_to_finish_segment,
             "positions": self.positions,
@@ -101,7 +101,9 @@ class GeneticAutopilot:
                     "angle": sensing_data.car_angle,
                     "speed": sensing_data.car_speed,
                     "position": json.dumps(list(sensing_data.car_position)),
-                    "checkpoint": sensing_data.checkpoints_passed - 1 if sensing_data.checkpoints_passed > 0 else -1,
+                    "checkpoint": sensing_data.checkpoints_passed - 1
+                    if sensing_data.checkpoints_passed > 0
+                    else -1,
                     "lap": 0,  # Always first lap for segments
                 }
             )
@@ -112,9 +114,8 @@ class GeneticAutopilot:
             self.stop_evaluation()
             return
 
-        # Detect wall hits
-        if self._detect_wall_hit(sensing_data):
-            self.wall_hits += 1
+        # Get collision count from car
+        self.collision_counter = sensing_data.collision_counter
 
         # Check segment completion (assuming segment completion when checkpoints_passed == total_checkpoints)
         if (
@@ -144,29 +145,6 @@ class GeneticAutopilot:
             held_keys["a"] = False
             held_keys["d"] = False
             self.stop_evaluation()
-
-    def _detect_wall_hit(self, sensing_data: SensingSnapshot) -> bool:
-        """Detect if car hit a wall based on raycast distances"""
-        if not sensing_data.raycast_distances:
-            return False
-
-        # Wall hit if any raycast is below threshold
-        wall_threshold = 1.0
-        current_hits = sum(
-            1 for dist in sensing_data.raycast_distances if dist < wall_threshold
-        )
-
-        # Compare with previous to detect new hits
-        if self.previous_raycasts:
-            prev_hits = sum(
-                1 for dist in self.previous_raycasts if dist < wall_threshold
-            )
-            if current_hits > prev_hits:
-                self.previous_raycasts = list(sensing_data.raycast_distances)
-                return True
-
-        self.previous_raycasts = list(sensing_data.raycast_distances)
-        return False
 
     def _execute_action(self, action: Tuple[int, int, int, int]):
         """Execute a single action by setting held_keys"""
@@ -210,7 +188,9 @@ class GeneticMsgProcessor:
         if action_sequences_path:
             self.autopilots = self.load_genetic_autopilots(action_sequences_path)
         elif action_sequences:
-            self.autopilots = [GeneticAutopilot(seq, self.segment) for seq in action_sequences]
+            self.autopilots = [
+                GeneticAutopilot(seq, self.segment) for seq in action_sequences
+            ]
         else:
             raise ValueError(
                 "Must provide either action_sequences_path or action_sequences"
@@ -266,12 +246,14 @@ class GeneticMsgProcessor:
             results = current_autopilot.stop_evaluation()
             self.results.append(results)
             print(
-                f"INDIVIDUAL {self.current_autopilot_index} RESULTS: {results['wall_hits']} {results['segment_completed']} {results['inputs_to_finish_segment']}"
+                f"INDIVIDUAL {self.current_autopilot_index} RESULTS: {results['collision_counter']} {results['segment_completed']} {results['inputs_to_finish_segment']}"
             )
-            print(json.dumps(results['positions']))
+            print(json.dumps(results["positions"]))
 
             # Save recorded frames
-            self._save_individual_record(self.current_autopilot_index, results['recorded_frames'])
+            self._save_individual_record(
+                self.current_autopilot_index, results["recorded_frames"]
+            )
 
             self.current_autopilot_index += 1
             if self.current_autopilot_index < len(self.autopilots):
@@ -291,6 +273,8 @@ class GeneticMsgProcessor:
             self.car.rotation_y = self.initial_angle
         if self.initial_speed is not None:
             self.car.speed = self.initial_speed
+        # Reset collision counter
+        self.car.reset_collision_counter()
         if self.car.checkpoint_handler:
             num_checkpoints = len(self.car.checkpoint_handler.lap_checkpoints)
             passed = set(range(self.segment + 1))
@@ -372,6 +356,7 @@ class GeneticMsgProcessor:
         snapshot.total_checkpoints = (
             message.total_checkpoints if hasattr(message, "total_checkpoints") else 0
         )
+        snapshot.collision_counter = self.car.collision_counter if self.car else 0
 
         # Update current autopilot
         current_autopilot.update(snapshot)
@@ -383,13 +368,15 @@ class GeneticMsgProcessor:
             self.results.append(results)
             # Print results for GA to parse
             print(
-                f"INDIVIDUAL {self.current_autopilot_index} RESULTS: {results['wall_hits']} {results['segment_completed']} {results['inputs_to_finish_segment']}"
+                f"INDIVIDUAL {self.current_autopilot_index} RESULTS: {results['collision_counter']} {results['segment_completed']} {results['inputs_to_finish_segment']}"
             )
 
             # Save recorded frames
-            recorded_frames = results.get('recorded_frames', [])
+            recorded_frames = results.get("recorded_frames", [])
             if recorded_frames:
-                self._save_individual_record(self.current_autopilot_index, recorded_frames)
+                self._save_individual_record(
+                    self.current_autopilot_index, recorded_frames
+                )
 
             self.current_autopilot_index += 1
             if self.current_autopilot_index < len(self.autopilots):

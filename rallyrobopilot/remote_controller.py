@@ -85,6 +85,7 @@ class RemoteController(Entity):
             snapshot.raycast_distances = (
                 self.car.multiray_sensor.collect_sensor_values()
             )
+            snapshot.collision_counter = self.car.collision_counter
 
             # Add lap info
             if hasattr(self.car, 'checkpoint_handler') and self.car.checkpoint_handler:

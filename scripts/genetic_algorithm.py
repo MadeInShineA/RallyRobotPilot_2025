@@ -308,7 +308,9 @@ class GeneticAlgorithm:
         print("This GA will automatically launch the game to evaluate fitness!")
 
         # Clear previous results for this segment
-        segment_dir = f"genetic_data/populations/{self.track_name}/segment_{self.segment}"
+        segment_dir = (
+            f"genetic_data/populations/{self.track_name}/segment_{self.segment}"
+        )
         if os.path.exists(segment_dir):
             shutil.rmtree(segment_dir)
             print(f"Cleared previous results in {segment_dir}")
@@ -387,7 +389,7 @@ class GeneticAlgorithm:
 
     def calculate_fitness(
         self,
-        wall_hits: int,
+        collision_counter: int,
         segment_completed: bool,
         inputs_to_finish_segment: int,
         distance_to_next: float,
@@ -399,11 +401,9 @@ class GeneticAlgorithm:
         else:
             base_fitness = distance_to_next
 
-        # TODO calcualted wall_hits
-        # wall_hits are always 0 for now
-        wall_penalty = wall_hits * 10.0
+        collision_penalty = collision_counter * 10.0
 
-        fitness = base_fitness + wall_penalty + inputs_to_finish_segment
+        fitness = base_fitness + collision_penalty + inputs_to_finish_segment
         return fitness
 
     def _evaluate_population_in_game(self, generation: int) -> List[float]:
@@ -462,9 +462,9 @@ class GeneticAlgorithm:
                         idx = int(parts[1])
                         results_str = " ".join(
                             parts[3:]
-                        )  # wall_hits segment_completed inputs_to_finish_segment
+                        )  # collision_counter segment_completed inputs_to_finish_segment
                         results_parts = results_str.split()
-                        wall_hits = int(results_parts[0])
+                        collision_counter = int(results_parts[0])
                         segment_completed = results_parts[1].lower() == "true"
                         inputs_to_finish_segment = int(results_parts[2])
 
@@ -490,7 +490,7 @@ class GeneticAlgorithm:
                                 ) ** 0.5
 
                         fitness_score = self.calculate_fitness(
-                            wall_hits,
+                            collision_counter,
                             segment_completed,
                             inputs_to_finish_segment,
                             distance,
@@ -502,14 +502,14 @@ class GeneticAlgorithm:
 
                         # Store detailed stats for this individual
                         self.individual_stats[idx] = {
-                            "wall_hits": wall_hits,
+                            "collision_counter": collision_counter,
                             "segment_completed": segment_completed,
                             "inputs_to_finish_segment": inputs_to_finish_segment,
                             "distance_to_checkpoint": distance,
                             "fitness_score": fitness_score,
                         }
                         print(
-                            f"Individual {idx}: wall_hits={wall_hits}, segment_completed={segment_completed}, inputs_to_finish_segment={inputs_to_finish_segment}, distance={distance:.2f}, fitness={fitness_score:.2f}"
+                            f"Individual {idx}: collision_counter={collision_counter}, segment_completed={segment_completed}, inputs_to_finish_segment={inputs_to_finish_segment}, distance={distance:.2f}, fitness={fitness_score:.2f}"
                         )
                     except (ValueError, IndexError):
                         pass

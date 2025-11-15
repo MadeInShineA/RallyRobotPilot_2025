@@ -49,6 +49,7 @@ class Car(Entity):
         self.camera_speed = camera_speed
         self.acceleration = acceleration
         self.friction = friction
+        self.collision_counter = 0
         self.turning_speed = 5
         self.pivot_rotation_distance = 1
 
@@ -581,6 +582,7 @@ class Car(Entity):
 
             #   Detect collision
             if front_collision.distance < self.scale_x + distance_to_travel:
+                self.collision_counter += 1
                 free_dist = front_collision.distance - self.scale_x + distance_to_travel
 
                 #   cancel speed going directly into the obstacle
@@ -657,6 +659,7 @@ class Car(Entity):
                 if self.multiray_sensor
                 else []
             )
+            snapshot.collision_counter = self.collision_counter
             if self.checkpoint_handler:
                 snapshot.checkpoints_passed = len(
                     self.checkpoint_handler.passed_checkpoints
@@ -758,6 +761,12 @@ class Car(Entity):
         self.count = self.reset_count
         self.timer.enable()
         self.reset_count_timer.disable()
+
+    def reset_collision_counter(self):
+        """
+        Resets the collision counter
+        """
+        self.collision_counter = 0
 
     def animate_text(self, text, top=1.2, bottom=0.6):
         """
