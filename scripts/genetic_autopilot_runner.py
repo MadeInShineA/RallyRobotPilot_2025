@@ -36,10 +36,10 @@ def load_replay_positions(replay_file):
 def main():
     if len(sys.argv) < 3:
         print(
-            "Usage: python genetic_autopilot_runner.py <action_sequences.json> <track_name> [--batch] [replay_file]"
+            "Usage: python genetic_autopilot_runner.py <action_sequences.json> <track_name> [--batch] [--start_segment <x>] [replay_file]"
         )
         print(
-            "Example: python genetic_autopilot_runner.py genetic_data/SimpleTrack_population.json SimpleTrack --batch records/record_0.npz"
+            "Example: python genetic_autopilot_runner.py genetic_data/SimpleTrack_population.json SimpleTrack --batch --start_segment 4 records/record_0.npz"
         )
         sys.exit(1)
 
@@ -52,6 +52,7 @@ def main():
     initial_angle = None
     initial_speed = None
     initial_position = None
+    start_segment = None
 
     args = sys.argv[3:]
     if batch_mode:
@@ -60,13 +61,16 @@ def main():
     i = 0
     while i < len(args):
         if args[i] == "--initial_angle":
-            initial_angle = float(args[i+1])
+            initial_angle = float(args[i + 1])
             i += 2
         elif args[i] == "--initial_speed":
-            initial_speed = float(args[i+1])
+            initial_speed = float(args[i + 1])
             i += 2
         elif args[i] == "--initial_position":
-            initial_position = json.loads(args[i+1])
+            initial_position = json.loads(args[i + 1])
+            i += 2
+        elif args[i] == "--start_segment":
+            start_segment = int(args[i + 1])
             i += 2
         else:
             if replay_file is None:
@@ -108,6 +112,7 @@ def main():
     if initial_speed is not None:
         car.speed = initial_speed
 
+    car.multiray_sensor = None
     # Set up Flask and remote controller like main.py
     flask_app = Flask(__name__)
     remote_controller = RemoteController(
@@ -124,6 +129,34 @@ def main():
         car.checkpoint_handler.show_ui()
     if car.multiray_sensor:
         car.multiray_sensor.set_enabled_rays(True)
+
+    # Set initial checkpoint state if start_segment is specified
+    if start_segment is not None and car.checkpoint_handler and car.checkpoint_handler.lap_checkpoints:
+        num_checkpoints = len(car.checkpoint_handler.lap_checkpoints)
+        if 0 <= start_segment < num_checkpoints:
+            # For segment x, passed checkpoints 0 to x, next is x+1
+            car.checkpoint_handler.passed_checkpoints = set(range(start_segment + 1))
+            # Set next checkpoint to (start_segment + 1) % num_checkpoints
+            car.checkpoint_handler.next_checkpoint_index = (start_segment + 1) % num_checkpoints
+            # If next is 0, all checkpoints are passed
+            if car.checkpoint_handler.next_checkpoint_index == 0:
+                car.checkpoint_handler.lap_completed_checkpoints = True
+
+            # Update visual entities
+            for entity_data in car.checkpoint_handler.checkpoint_entities:
+                cp_id = entity_data["data"]["id"]
+                if cp_id in car.checkpoint_handler.passed_checkpoints:
+                    entity_data["passed"] = True
+                    entity_data["entity"].color = ursina.color.blue
+                    entity_data["text"].color = ursina.color.cyan
+                else:
+                    entity_data["passed"] = False
+                    entity_data["entity"].color = ursina.color.green
+                    entity_data["text"].color = ursina.color.yellow
+
+            print(f"Initialized for segment {start_segment}: passed 0-{start_segment}, next is {car.checkpoint_handler.next_checkpoint_index}")
+        else:
+            print(f"Warning: start_segment {start_segment} is out of range (0-{num_checkpoints-1})")
 
     # Display initial replay trajectory if provided
     if replay_file:

@@ -231,6 +231,7 @@ class GeneticAlgorithm:
                 population_file,
                 self.track_name,
                 "--batch",
+                "--start_segment", str(self.segment),
                 "--initial_angle", str(self.initial_angle),
                 "--initial_speed", str(self.initial_speed),
                 "--initial_position", json.dumps(self.initial_position),
