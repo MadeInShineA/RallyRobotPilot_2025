@@ -45,6 +45,18 @@ class GeneticAlgorithm:
         else:
             print(f"Warning: checkpoints.json not found at {checkpoints_path}")
 
+        # Load track metadata for obstacles
+        self.track_metadata = {}
+        metadata_path = f"assets/{self.track_name}/track_metadata.json"
+        if os.path.exists(metadata_path):
+            with open(metadata_path) as f:
+                self.track_metadata = json.load(f)
+        else:
+            print(f"Warning: track_metadata.json not found at {metadata_path}")
+
+        # Load obstacle vertices for plotting track boundaries
+        self.obstacle_vertices = self._load_obstacle_vertices()
+
         # Load or initialize population
         self.population = self._load_population()
         self.fitness_scores = []
@@ -56,16 +68,81 @@ class GeneticAlgorithm:
         self.best_individual_idx = None
         self.best_individual_stats = None
 
-        # Original raycasts for circuit drawing
-        self.original_raycasts = []
+    def _load_obstacle_vertices(self):
+        """Load and transform obstacle vertices for track boundary plotting"""
+        obstacle_data = []
+        if not self.track_metadata or "obstacles" not in self.track_metadata:
+            return obstacle_data
+
+        origin_pos = np.array(self.track_metadata.get("origin_position", [0, 0, 0]))
+        origin_rot_y = self.track_metadata.get("origin_rotation", [0, 0, 0])[1]
+        origin_scale = self.track_metadata.get("origin_scale", [1, 1, 1])
+        scale = origin_scale[1] if len(origin_scale) > 1 else 1.0
+
+        for obstacle in self.track_metadata["obstacles"]:
+            model_path = f"assets/{self.track_name}/{obstacle['model']}"
+            if os.path.exists(model_path):
+                obs_vertices, obs_faces = self._parse_obj_vertices(model_path)
+                transformed_vertices = []
+                for v in obs_vertices:
+                    scaled_v = np.array(v) * scale
+                    rot_rad = math.radians(origin_rot_y)
+                    cos_r = math.cos(rot_rad)
+                    sin_r = math.sin(rot_rad)
+                    rotated_v = np.array(
+                        [
+                            scaled_v[0] * cos_r - scaled_v[2] * sin_r,
+                            scaled_v[1],
+                            scaled_v[0] * sin_r + scaled_v[2] * cos_r,
+                        ]
+                    )
+                    transformed_v = rotated_v + origin_pos
+                    transformed_vertices.append(transformed_v)
+
+                # Store both transformed vertices and faces
+                obstacle_data.append(
+                    {"vertices": transformed_vertices, "faces": obs_faces}
+                )
+
+        return obstacle_data
+
+    def _parse_obj_vertices(self, obj_path):
+        """Parse vertices and faces from OBJ file"""
+        vertices = []
+        faces = []
+        with open(obj_path, "r") as f:
+            for line in f:
+                if line.startswith("v "):
+                    parts = line.split()
+                    if len(parts) >= 4:
+                        try:
+                            v = [float(parts[1]), float(parts[2]), float(parts[3])]
+                            vertices.append(v)
+                        except ValueError:
+                            pass
+                elif line.startswith("f "):
+                    parts = line.split()
+                    if len(parts) >= 4:  # At least a triangle
+                        face = []
+                        for p in parts[1:]:
+                            # Parse vertex index (ignore texture and normal indices)
+                            v_idx = (
+                                int(p.split("/")[0]) - 1
+                            )  # OBJ uses 1-based indexing
+                            face.append(v_idx)
+                        faces.append(face)
+        return vertices, faces
 
     def load_replay_data(
         self, replay_file: str
     ) -> Tuple[
-        List[Tuple[int, int, int, int]], List[Tuple[float, float, float]], List[float], List[List[float]]
+        List[Tuple[int, int, int, int]],
+        List[Tuple[float, float, float]],
+        List[float],
+        List[List[float]],
     ]:
         """
-        Load actions, positions, angles, and raycasts from replay file.
+        Load actions, positions, angles from replay file.
         Assumes replay is a list of SensingSnapshot objects or dicts.
         Returns actions as tuples of booleans, positions as tuples, angles as floats, raycasts as lists.
         """
@@ -74,21 +151,18 @@ class GeneticAlgorithm:
         actions = []
         positions = []
         angles = []
-        raycasts = []
         for msg in data:
-            if hasattr(msg, 'current_controls'):
+            if hasattr(msg, "current_controls"):
                 # SensingSnapshot
                 actions.append(tuple(msg.current_controls))
                 positions.append(tuple(msg.car_position))
                 angles.append(msg.car_angle)
-                raycasts.append(list(msg.raycast_distances) if msg.raycast_distances else [])
             else:
                 # Dict from manual recording
-                actions.append(tuple(msg['input']))
-                positions.append(tuple(json.loads(msg['position'])))
-                angles.append(msg['angle'])
-                raycasts.append(list(msg.get('raycasts', [])))
-        return actions, positions, angles, raycasts
+                actions.append(tuple(msg["input"]))
+                positions.append(tuple(json.loads(msg["position"])))
+                angles.append(msg["angle"])
+        return actions, positions, angles
 
     def mutate_actions(
         self, actions: List[Tuple[int, int, int, int]], mutation_rate: float = 0.3
@@ -120,7 +194,9 @@ class GeneticAlgorithm:
         """Create initial population by mutating base actions from segment"""
         # Load segment data
         segment_file = f"genetic_data/records/{self.track_name}/segments/segment_{self.segment}.json"
-        print(f"DEBUG _initialize_population: segment_file {segment_file} exists: {os.path.exists(segment_file)}")
+        print(
+            f"DEBUG _initialize_population: segment_file {segment_file} exists: {os.path.exists(segment_file)}"
+        )
         if os.path.exists(segment_file):
             with open(segment_file) as f:
                 data = json.load(f)
@@ -133,8 +209,6 @@ class GeneticAlgorithm:
             self.initial_position = json.loads(initial["position"])
             self.original_positions = [json.loads(item["position"]) for item in data]
             self.original_angles = [item["angle"] for item in data]
-            self.original_raycasts = [item.get("raycasts", []) for item in data]
-            print(f"DEBUG _initialize_population: data len: {len(data)}, original_raycasts len: {len(self.original_raycasts)}, first raycasts: {self.original_raycasts[0] if self.original_raycasts else 'empty'}")
             print(f"Using segment inputs from {segment_file} as base actions")
         else:
             print(f"No segment file found at {segment_file}")
@@ -520,17 +594,13 @@ class GeneticAlgorithm:
                 data = json.load(f)
             self.original_positions = [json.loads(item["position"]) for item in data]
             self.original_angles = [item["angle"] for item in data]
-            self.original_raycasts = [item.get("raycasts", []) for item in data]
         else:
             self.original_positions = []
             self.original_angles = []
-            self.original_raycasts = []
 
     def _generate_summary_plot(self):
         """Generate a comprehensive summary plot for all generations"""
         # Ensure original data is loaded
-        if not hasattr(self, "original_raycasts") or not self.original_raycasts:
-            self._load_original_data()
 
         summary_file = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/summary.json"
 
@@ -604,12 +674,17 @@ class GeneticAlgorithm:
                     trajectory_data = json.load(f)
 
                 # Extract positions, prepend initial if not present
-                positions = [frame.get("position", [0, 0, 0]) for frame in trajectory_data]
-                positions = [json.loads(pos) if isinstance(pos, str) else pos for pos in positions]
+                positions = [
+                    frame.get("position", [0, 0, 0]) for frame in trajectory_data
+                ]
+                positions = [
+                    json.loads(pos) if isinstance(pos, str) else pos
+                    for pos in positions
+                ]
                 if positions and positions[0] != self.initial_position:
                     positions.insert(0, self.initial_position)
-                traj_x = [pos[0] for pos in positions]
-                traj_z = [pos[2] for pos in positions]
+                traj_x = [-pos[0] for pos in positions]  # Flip horizontally
+                traj_z = [-pos[2] for pos in positions]  # Flip vertically
 
                 # Check if this is the overall best
                 if gen_num == best_gen_num and ind_idx == best_ind_idx:
@@ -631,8 +706,8 @@ class GeneticAlgorithm:
 
         # Plot original trajectory (from initial segment data)
         if hasattr(self, "original_positions") and self.original_positions:
-            orig_x = [p[0] for p in self.original_positions]
-            orig_z = [p[2] for p in self.original_positions]
+            orig_x = [-p[0] for p in self.original_positions]  # Flip horizontally
+            orig_z = [-p[2] for p in self.original_positions]  # Flip vertically
             ax1.plot(
                 orig_x,
                 orig_z,
@@ -642,64 +717,42 @@ class GeneticAlgorithm:
                 alpha=0.8,
                 zorder=2,
             )
+            # Plot track boundaries from obstacles as connected lines
 
-            # Plot circuit boundaries from raycasts with smoothing
-            if hasattr(self, "original_raycasts") and self.original_raycasts and hasattr(self, 'original_angles'):
-                print("DEBUG: Entering circuit boundary plotting")
-                nbr_rays = len(self.original_raycasts[0]) if self.original_raycasts else 0
-                if nbr_rays > 1:
-                    # Only use leftmost and rightmost rays for track borders
-                    border_rays = [0, nbr_rays - 1]
-                    # Collect distances for border rays
-                    dists_per_ray = [[] for _ in border_rays]
-                    for i in range(len(self.original_positions)):
-                        if i < len(self.original_raycasts) and self.original_raycasts[i]:
-                            raycasts = self.original_raycasts[i]
-                            for idx, j in enumerate(border_rays):
-                                if j < len(raycasts):
-                                    dists_per_ray[idx].append(raycasts[j])
+            if self.obstacle_vertices:
+                for i, obstacle in enumerate(self.obstacle_vertices):
+                    vertices = obstacle["vertices"]
+                    faces = obstacle["faces"]
 
-                    # Apply rolling window smoothing (window size 5)
-                    window_size = 5
-                    smoothed_dists = []
-                    for dists in dists_per_ray:
-                        smoothed = []
-                        for k in range(len(dists)):
-                            start = max(0, k - window_size // 2)
-                            end = min(len(dists), k + window_size // 2 + 1)
-                            smoothed.append(sum(dists[start:end]) / (end - start))
-                        smoothed_dists.append(smoothed)
+                    # Plot each face as a separate polygon
+                    for face in faces:
+                        # Get the vertices for this face
+                        face_vertices = [vertices[idx] for idx in face]
 
-                    # Plot smoothed border lines
-                    half_angle = 90
-                    left_hits = []
-                    right_hits = []
-                    for i in range(len(self.original_positions)):
-                        if i < len(self.original_angles) and i < len(smoothed_dists[0]):
-                            car_x, car_y, car_z = self.original_positions[i]
-                            car_angle_rad = math.radians(self.original_angles[i])
-                            for idx, j in enumerate(border_rays):
-                                smoothed_dist = smoothed_dists[idx][i]
-                                if smoothed_dist < 99:
-                                    relative_angle = -half_angle + 2 * half_angle / (nbr_rays - 1) * j
-                                    angle_rad = math.radians(relative_angle) + car_angle_rad
-                                    hit_x = car_x + smoothed_dist * math.sin(angle_rad)
-                                    hit_z = car_z + smoothed_dist * math.cos(angle_rad)
-                                    if idx == 0:  # Left
-                                        left_hits.append((hit_x, hit_z))
-                                    else:  # Right
-                                        right_hits.append((hit_x, hit_z))
-                    if left_hits:
-                        left_xs, left_zs = zip(*left_hits)
-                        ax1.plot(left_xs, left_zs, 'black', linewidth=2, alpha=0.8, zorder=1, label='Left Border')
-                    if right_hits:
-                        right_xs, right_zs = zip(*right_hits)
-                        ax1.plot(right_xs, right_zs, 'black', linewidth=2, alpha=0.8, zorder=1, label='Right Border')
-                    total_points = len(left_hits) + len(right_hits)
-                    if total_points > 0:
-                        print(f"Plotted smoothed track borders with {total_points} points")
-                else:
-                    print("DEBUG: Not enough rays or data")
+                        # Extract X and Z coordinates (flip Z vertically)
+                        xs = [v[0] for v in face_vertices]
+                        zs = [-v[2] for v in face_vertices]
+
+                        # Close the polygon by repeating the first point at the end
+                        xs.append(xs[0])
+                        zs.append(zs[0])
+
+                        # Plot this face
+                        ax1.plot(
+                            xs,
+                            zs,
+                            color="black",
+                            linewidth=2,
+                            alpha=1.0,
+                            zorder=1,
+                            label="Track Elements"
+                            if i == 0 and face == faces[0]
+                            else "",
+                        )
+
+                print(
+                    f"Plotted {len(self.obstacle_vertices)} obstacles with {sum(len(obstacle['faces']) for obstacle in self.obstacle_vertices)} faces as track boundaries"
+                )
 
         # Add legend and labels
         ax1.set_xlabel("X Position", fontsize=12)
@@ -724,12 +777,53 @@ class GeneticAlgorithm:
             Line2D([0], [0], color="blue", linewidth=4, label="Overall Best"),
         ]
         # Add border legends
-        border_legend = [Line2D([0], [0], color='black', linewidth=2, label='Track Borders')]
-        legend_elements.extend(border_legend)
+        if self.obstacle_vertices:
+            legend_elements.append(
+                Line2D(
+                    [0],
+                    [0],
+                    color="black",
+                    marker="o",
+                    markersize=1,
+                    linestyle="None",
+                    label="Track Elements",
+                )
+            )
         ax1.legend(handles=legend_elements, fontsize=10)
 
         ax1.grid(True, alpha=0.3)
-        ax1.axis("equal")
+        # Zoom on trajectories
+        all_x = []
+        all_z = []
+        for g in summary["generations"]:
+            gen_num = g["generation"]
+            ind_idx = g["best_generation_individual_idx"]
+            trajectory_file = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/generation_{gen_num}/individual_{ind_idx}.json"
+            if os.path.exists(trajectory_file):
+                with open(trajectory_file, "r") as f:
+                    trajectory_data = json.load(f)
+                positions = [
+                    frame.get("position", [0, 0, 0]) for frame in trajectory_data
+                ]
+                positions = [
+                    json.loads(pos) if isinstance(pos, str) else pos
+                    for pos in positions
+                ]
+                if positions and positions[0] != self.initial_position:
+                    positions.insert(0, self.initial_position)
+                traj_x = [-pos[0] for pos in positions]
+                traj_z = [-pos[2] for pos in positions]
+                all_x.extend(traj_x)
+                all_z.extend(traj_z)
+        if hasattr(self, "original_positions") and self.original_positions:
+            orig_x = [-p[0] for p in self.original_positions]
+            orig_z = [-p[2] for p in self.original_positions]
+            all_x.extend(orig_x)
+            all_z.extend(orig_z)
+        if all_x and all_z:
+            margin = 15
+            ax1.set_xlim(min(all_x) - margin, max(all_x) + margin)
+            ax1.set_ylim(min(all_z) - margin, max(all_z) + margin)
 
         # 2. Fitness Score over Generations (now ax2)
         ax2.plot(
@@ -842,10 +936,6 @@ class GeneticAlgorithm:
 
     def _plot_combined_analysis(self, generation, best_idx, graph_dir):
         """Create combined figure with trajectory, completion, and frames analysis"""
-        # Ensure original data is loaded
-        if not hasattr(self, "original_raycasts") or not self.original_raycasts:
-            self._load_original_data()
-
         fig = plt.figure(figsize=(16, 12))
 
         # Create subplot grid: 2 rows, 2 columns
@@ -860,8 +950,8 @@ class GeneticAlgorithm:
         # Plot all individual trajectories in light gray
         for i, positions in enumerate(self.individual_positions):
             if positions:
-                x = [p[0] for p in positions]
-                z = [p[2] for p in positions]
+                x = [-p[0] for p in positions]  # Flip horizontally
+                z = [-p[2] for p in positions]  # Flip vertically
                 ax1.plot(x, z, color="lightgray", alpha=0.4, linewidth=1)
 
         # Plot best trajectory
@@ -873,8 +963,8 @@ class GeneticAlgorithm:
         )
 
         if best_positions:
-            x_best = [p[0] for p in best_positions]
-            z_best = [p[2] for p in best_positions]
+            x_best = [-p[0] for p in best_positions]  # Flip horizontally
+            z_best = [-p[2] for p in best_positions]  # Flip vertically
             ax1.plot(
                 x_best,
                 z_best,
@@ -885,8 +975,8 @@ class GeneticAlgorithm:
             )
 
         # Plot original trajectory
-        x_orig = [p[0] for p in self.original_positions]
-        z_orig = [p[2] for p in self.original_positions]
+        x_orig = [-p[0] for p in self.original_positions]  # Flip horizontally
+        z_orig = [-p[2] for p in self.original_positions]  # Flip vertically
         ax1.plot(
             x_orig,
             z_orig,
@@ -903,57 +993,56 @@ class GeneticAlgorithm:
             fontsize=13,
             fontweight="bold",
         )
-        # Add track borders
-        if hasattr(self, "original_raycasts") and self.original_raycasts and hasattr(self, 'original_angles'):
-            nbr_rays = len(self.original_raycasts[0]) if self.original_raycasts else 0
-            if nbr_rays > 1:
-                border_rays = [0, nbr_rays - 1]
-                dists_per_ray = [[] for _ in border_rays]
-                for i in range(len(self.original_positions)):
-                    if i < len(self.original_raycasts) and self.original_raycasts[i]:
-                        raycasts = self.original_raycasts[i]
-                        for idx, j in enumerate(border_rays):
-                            if j < len(raycasts):
-                                dists_per_ray[idx].append(raycasts[j])
+        # Add track borders from obstacles
+        if self.obstacle_vertices:
+            for obstacle in self.obstacle_vertices:
+                vertices = obstacle["vertices"]
+                faces = obstacle["faces"]
 
-                window_size = 5
-                smoothed_dists = []
-                for dists in dists_per_ray:
-                    smoothed = []
-                    for k in range(len(dists)):
-                        start = max(0, k - window_size // 2)
-                        end = min(len(dists), k + window_size // 2 + 1)
-                        smoothed.append(sum(dists[start:end]) / (end - start))
-                    smoothed_dists.append(smoothed)
+                # Plot each face as a separate polygon
+                for face in faces:
+                    # Get the vertices for this face
+                    face_vertices = [vertices[idx] for idx in face]
 
-                half_angle = 90
-                left_hits = []
-                right_hits = []
-                for i in range(len(self.original_positions)):
-                    if i < len(self.original_angles) and i < len(smoothed_dists[0]):
-                        car_x, car_y, car_z = self.original_positions[i]
-                        car_angle_rad = math.radians(self.original_angles[i])
-                        for idx, j in enumerate(border_rays):
-                            smoothed_dist = smoothed_dists[idx][i]
-                            if smoothed_dist < 99:
-                                relative_angle = -half_angle + 2 * half_angle / (nbr_rays - 1) * j
-                                angle_rad = math.radians(relative_angle) + car_angle_rad
-                                hit_x = car_x + smoothed_dist * math.sin(angle_rad)
-                                hit_z = car_z + smoothed_dist * math.cos(angle_rad)
-                                if idx == 0:
-                                    left_hits.append((hit_x, hit_z))
-                                else:
-                                    right_hits.append((hit_x, hit_z))
-                if left_hits:
-                    left_xs, left_zs = zip(*left_hits)
-                    ax1.plot(left_xs, left_zs, 'black', linewidth=2, alpha=0.8, zorder=1)
-                if right_hits:
-                    right_xs, right_zs = zip(*right_hits)
-                    ax1.plot(right_xs, right_zs, 'black', linewidth=2, alpha=0.8, zorder=1)
+                    # Extract X and Z coordinates (flip Z vertically)
+                    xs = [v[0] for v in face_vertices]
+                    zs = [-v[2] for v in face_vertices]
+
+                    # Close the polygon by repeating the first point at the end
+                    xs.append(xs[0])
+                    zs.append(zs[0])
+
+                    # Plot this face
+                    ax1.plot(xs, zs, color="black", linewidth=2, alpha=1.0, zorder=1)
 
         ax1.legend(fontsize=10, loc="best")
         ax1.grid(True, alpha=0.3)
-        ax1.axis("equal")
+        # Zoom on trajectories
+        all_x = []
+        all_z = []
+        # Collect from all individual trajectories
+        for positions in self.individual_positions:
+            if positions:
+                x = [-p[0] for p in positions]
+                z = [-p[2] for p in positions]
+                all_x.extend(x)
+                all_z.extend(z)
+        # From best
+        if best_positions:
+            x_best = [-p[0] for p in best_positions]
+            z_best = [-p[2] for p in best_positions]
+            all_x.extend(x_best)
+            all_z.extend(z_best)
+        # From original
+        if hasattr(self, "original_positions") and self.original_positions:
+            x_orig = [-p[0] for p in self.original_positions]
+            z_orig = [-p[2] for p in self.original_positions]
+            all_x.extend(x_orig)
+            all_z.extend(z_orig)
+        if all_x and all_z:
+            margin = 15
+            ax1.set_xlim(min(all_x) - margin, max(all_x) + margin)
+            ax1.set_ylim(min(all_z) - margin, max(all_z) + margin)
 
         # 2. Completion status pie chart
         completed_count = sum(self.completion_status)
