@@ -11,9 +11,13 @@ class GeneticAutopilot:
     """Autopilot that executes genetic algorithm action sequences and collects fitness data"""
 
     def __init__(
-        self, action_sequence: List[Tuple[int, int, int, int]], max_time: float = 300.0
+        self,
+        action_sequence: List[Tuple[int, int, int, int]],
+        segment: int,
+        max_time: float = 5.0,
     ):
         self.action_sequence = action_sequence
+        self.segment = segment
         self.max_time = max_time
         self.current_action_index = 0
         self.start_time = 0.0
@@ -42,7 +46,11 @@ class GeneticAutopilot:
         self.total_time = time.time() - self.start_time
         self.is_running = False
 
-        self.inputs_to_finish_segment = self.current_action_index if self.segment_completed else len(self.action_sequence)
+        self.inputs_to_finish_segment = (
+            self.current_action_index
+            if self.segment_completed
+            else len(self.action_sequence)
+        )
 
         results = {
             "wall_hits": self.wall_hits,
@@ -70,10 +78,14 @@ class GeneticAutopilot:
 
         # Check segment completion (assuming segment completion when checkpoints_passed == total_checkpoints)
         if (
-            sensing_data.checkpoints_passed >= sensing_data.total_checkpoints
+            sensing_data.checkpoints_passed > self.segment + 1
             and sensing_data.total_checkpoints > 0
         ):
             self.segment_completed = True
+            held_keys["w"] = False
+            held_keys["s"] = False
+            held_keys["a"] = False
+            held_keys["d"] = False
             self.stop_evaluation()
             return
 
@@ -143,15 +155,6 @@ class GeneticMsgProcessor:
         initial_angle: Optional[float] = None,
         initial_speed: Optional[float] = None,
     ):
-        if action_sequences_path:
-            self.autopilots = self.load_genetic_autopilots(action_sequences_path)
-        elif action_sequences:
-            self.autopilots = [GeneticAutopilot(seq) for seq in action_sequences]
-        else:
-            raise ValueError(
-                "Must provide either action_sequences_path or action_sequences"
-            )
-
         self.current_autopilot_index = 0
         self.results = []
         self.checkpoint_handler = None
@@ -160,6 +163,14 @@ class GeneticMsgProcessor:
         self.initial_angle = initial_angle
         self.initial_speed = initial_speed
         self.car = None
+        if action_sequences_path:
+            self.autopilots = self.load_genetic_autopilots(action_sequences_path)
+        elif action_sequences:
+            self.autopilots = [GeneticAutopilot(seq) for seq in action_sequences]
+        else:
+            raise ValueError(
+                "Must provide either action_sequences_path or action_sequences"
+            )
 
     def load_genetic_autopilots(
         self, action_sequences_path: str
@@ -173,7 +184,7 @@ class GeneticMsgProcessor:
         with open(action_sequences_path, "r") as f:
             action_sequences = json.load(f)
 
-        return [GeneticAutopilot(seq) for seq in action_sequences]
+        return [GeneticAutopilot(seq, self.segment) for seq in action_sequences]
 
     def load_single_autopilot(self, action_sequence_path: str) -> GeneticAutopilot:
         """Load a single genetic autopilot from a JSON file containing action sequences"""
