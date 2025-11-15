@@ -102,7 +102,10 @@ class GeneticAlgorithm:
             print(f"No segment file found at {segment_file}")
             exit()
         # First individual is exact base actions, others are mutations
-        population = [base_actions] + [self.mutate_actions(base_actions, self.mutation_rate) for _ in range(self.population_size - 1)]
+        population = [base_actions] + [
+            self.mutate_actions(base_actions, self.mutation_rate)
+            for _ in range(self.population_size - 1)
+        ]
 
         return population
 
@@ -231,10 +234,14 @@ class GeneticAlgorithm:
                 population_file,
                 self.track_name,
                 "--batch",
-                "--start_segment", str(self.segment),
-                "--initial_angle", str(self.initial_angle),
-                "--initial_speed", str(self.initial_speed),
-                "--initial_position", json.dumps(self.initial_position),
+                "--start_segment",
+                str(self.segment),
+                "--initial_angle",
+                str(self.initial_angle),
+                "--initial_speed",
+                str(self.initial_speed),
+                "--initial_position",
+                json.dumps(self.initial_position),
             ]
             if self.replay_file:
                 cmd.append(self.replay_file)
@@ -252,25 +259,27 @@ class GeneticAlgorithm:
             # Parse results from stdout
             # The genetic_autopilot_runner should output fitness scores
             lines = result.stdout.strip().split("\n")
-            fitness_scores = []
+            fitness_dict = {}
 
             for line in lines:
-                if line.startswith("FITNESS:"):
+                if line.startswith("INDIVIDUAL") and "FITNESS:" in line:
+                    parts = line.split()
                     try:
-                        score = float(line.split(":")[1].strip())
-                        fitness_scores.append(score)
+                        idx = int(parts[1])
+                        score = float(parts[3])
+                        fitness_dict[idx] = score
+                        print(
+                            f"Individual {idx} finished with fitness score of {score}"
+                        )
                     except (ValueError, IndexError):
                         continue
 
-            if len(fitness_scores) != len(self.population):
-                print(
-                    f"Warning: Expected {len(self.population)} fitness scores, got {len(fitness_scores)}"
-                )
-                # Pad with high scores if needed
-                while len(fitness_scores) < len(self.population):
-                    fitness_scores.append(1000.0)
+            # Build fitness_scores list, defaulting to high penalty
+            fitness_scores = [
+                fitness_dict.get(i, 1000.0) for i in range(len(self.population))
+            ]
 
-            return fitness_scores[: len(self.population)]
+            return fitness_scores
 
         finally:
             # Clean up temporary file
@@ -309,7 +318,8 @@ def main():
     population_size = int(sys.argv[2])
     generations = int(sys.argv[3])
     segment = int(sys.argv[4])
-    mutation_rate = 0.3
+    mutation_rate = 0.0
+    crossover_rate = 0.0
 
     ga = GeneticAlgorithm(
         track_name,
@@ -317,6 +327,7 @@ def main():
         generations,
         segment=segment,
         mutation_rate=mutation_rate,
+        crossover_rate=crossover_rate,
     )
     ga.run_evolution()
 

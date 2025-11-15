@@ -3,6 +3,7 @@ import time
 import os
 from typing import List, Tuple, Optional
 from rallyrobopilot.sensing_message import SensingSnapshot
+import ursina
 from ursina import held_keys
 
 
@@ -85,15 +86,20 @@ class GeneticAutopilot:
             self.stop_evaluation()
             return
 
-        # Execute current action every 10 frames
+        # Execute current action every frames
         if self.current_action_index < len(self.action_sequence):
             action = self.action_sequence[self.current_action_index]
+            print(f"Action: {action}")
             self._execute_action(action)
 
             # Move to next action
             self.current_action_index += 1
         else:
-            # Action sequence finished
+            # Action sequence finished - release all keys
+            held_keys["w"] = False
+            held_keys["s"] = False
+            held_keys["a"] = False
+            held_keys["d"] = False
             self.stop_evaluation()
 
     def _detect_wall_hit(self, sensing_data: SensingSnapshot) -> bool:
@@ -141,6 +147,10 @@ class GeneticMsgProcessor:
         self,
         action_sequences_path: Optional[str] = None,
         action_sequences: Optional[List[List[Tuple[int, int, int, int]]]] = None,
+        segment: int = 0,
+        initial_position: Optional[List[float]] = None,
+        initial_angle: Optional[float] = None,
+        initial_speed: Optional[float] = None,
     ):
         if action_sequences_path:
             self.autopilots = self.load_genetic_autopilots(action_sequences_path)
@@ -154,6 +164,11 @@ class GeneticMsgProcessor:
         self.current_autopilot_index = 0
         self.results = []
         self.checkpoint_handler = None
+        self.segment = segment
+        self.initial_position = initial_position
+        self.initial_angle = initial_angle
+        self.initial_speed = initial_speed
+        self.car = None
 
     def load_genetic_autopilots(
         self, action_sequences_path: str
@@ -187,10 +202,67 @@ class GeneticMsgProcessor:
         self.results = []
         if self.autopilots:
             self.autopilots[0].start_evaluation()
+            self._reset_car_for_individual(0)
 
     def get_results(self):
         """Get evaluation results for all autopilots"""
         return self.results
+
+    def update(self, sensing_data):
+        """Update the current autopilot and handle switching"""
+        if self.current_autopilot_index >= len(self.autopilots):
+            return
+
+        current_autopilot = self.autopilots[self.current_autopilot_index]
+        current_autopilot.update(sensing_data)
+
+        if not current_autopilot.is_running:
+            results = current_autopilot.stop_evaluation()
+            self.results.append(results)
+            print(f"INDIVIDUAL {self.current_autopilot_index} FITNESS: {results['lap_time']}")
+            self.current_autopilot_index += 1
+            if self.current_autopilot_index < len(self.autopilots):
+                print(f"Switching to individual {self.current_autopilot_index}")
+                self.autopilots[self.current_autopilot_index].start_evaluation()
+                self._reset_car_for_individual(self.current_autopilot_index)
+            else:
+                print("ALL_EVALUATIONS_COMPLETE")
+
+    def _reset_car_for_individual(self, idx):
+        """Reset the car to initial conditions for a new individual"""
+        if not self.car:
+            return
+        if self.initial_position:
+            self.car.position = ursina.Vec3(*self.initial_position)
+        if self.initial_angle is not None:
+            self.car.rotation_y = self.initial_angle
+        if self.initial_speed is not None:
+            self.car.speed = self.initial_speed
+        if self.car.checkpoint_handler:
+            num_checkpoints = len(self.car.checkpoint_handler.lap_checkpoints)
+            passed = set(range(self.segment + 1))
+            self.car.checkpoint_handler.passed_checkpoints = passed
+            self.car.checkpoint_handler.next_checkpoint_index = (self.segment + 1) % num_checkpoints
+            if self.car.checkpoint_handler.next_checkpoint_index == 0:
+                self.car.checkpoint_handler.lap_completed_checkpoints = True
+            # Update visuals
+            for entity_data in self.car.checkpoint_handler.checkpoint_entities:
+                cp_id = entity_data["data"]["id"]
+                if cp_id in passed:
+                    entity_data["passed"] = True
+                    entity_data["entity"].color = ursina.color.blue
+                    entity_data["text"].color = ursina.color.cyan
+                else:
+                    entity_data["passed"] = False
+                    entity_data["entity"].color = ursina.color.green
+                    entity_data["text"].color = ursina.color.yellow
+
+    @property
+    def is_running(self):
+        """Check if the current evaluation is running"""
+        if self.current_autopilot_index >= len(self.autopilots):
+            return False
+        return self.autopilots[self.current_autopilot_index].is_running
 
     def process_message(self, message, data_collector):
         """Process sensing messages for genetic autopilot"""
@@ -238,6 +310,8 @@ class GeneticMsgProcessor:
             # Save results and move to next autopilot
             results = current_autopilot.stop_evaluation()
             self.results.append(results)
+            # Print fitness for GA to parse
+            print(f"INDIVIDUAL {self.current_autopilot_index} FITNESS: {results['lap_time']}")
 
             self.current_autopilot_index += 1
             if self.current_autopilot_index < len(self.autopilots):

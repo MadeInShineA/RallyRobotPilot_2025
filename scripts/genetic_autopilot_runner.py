@@ -77,6 +77,9 @@ def main():
                 replay_file = args[i]
             i += 1
 
+    if start_segment is None:
+        start_segment = 0
+
     if not os.path.exists(action_sequences_path):
         print(f"Error: Action sequences file '{action_sequences_path}' not found")
         sys.exit(1)
@@ -90,7 +93,11 @@ def main():
     # Create the genetic message processor
     try:
         genetic_processor = GeneticMsgProcessor(
-            action_sequences_path=action_sequences_path
+            action_sequences_path=action_sequences_path,
+            segment=start_segment,
+            initial_position=initial_position,
+            initial_angle=initial_angle,
+            initial_speed=initial_speed,
         )
         print(f"Loaded {len(genetic_processor.autopilots)} genetic autopilots")
     except Exception as e:
@@ -121,8 +128,9 @@ def main():
 
     # Set up the car with autopilot
     car.batch_mode = batch_mode
-    car.autopilot = genetic_processor.autopilots[0]
-    genetic_processor.autopilots[0].start_evaluation()
+    car.autopilot = genetic_processor
+    genetic_processor.car = car
+    genetic_processor.start_evaluation()
 
     # Show checkpoints and rays for visualization
     if car.checkpoint_handler:
@@ -185,6 +193,9 @@ def main():
             sleep_time = frame_time - elapsed
             if sleep_time > 0:
                 time.sleep(sleep_time)
+            # Check if autopilot finished
+            if car.autopilot and not car.autopilot.is_running:
+                break
     except KeyboardInterrupt:
         print("\nInterrupted by user")
 
