@@ -192,11 +192,7 @@ class GeneticAlgorithm:
         """Create new population through selection, crossover, and mutation"""
         new_population = []
 
-        # Elitism: keep best individual
-        best_idx = self.fitness_scores.index(min(self.fitness_scores))
-        new_population.append(self.population[best_idx])
-
-        # Fill rest of population
+        # Fill population through selection, crossover, and mutation (no elitism)
         while len(new_population) < self.population_size:
             parent1, parent2 = self._select_parents()
             child1, child2 = self._crossover(parent1, parent2)
@@ -228,6 +224,10 @@ class GeneticAlgorithm:
             min_fitness = min(self.fitness_scores)
             best_idx = self.fitness_scores.index(min_fitness)
             generation_best_stats = self.individual_stats[best_idx]
+
+            print(
+                f"Generation {generation + 1} best: idx={best_idx}, fitness={min_fitness:.2f}, stats={generation_best_stats}"
+            )
 
             # Save this generation's data
             self._save_generation_result(
@@ -347,7 +347,6 @@ class GeneticAlgorithm:
             fitness_dict = {}
             self.individual_positions = [[] for _ in range(len(self.population))]
             self.completion_status = [False] * len(self.population)
-            self.frames_used = [0] * len(self.population)
             self.individual_stats = [{}] * len(self.population)
 
             i = 0
@@ -396,7 +395,6 @@ class GeneticAlgorithm:
 
                         self.individual_positions[idx] = positions
                         self.completion_status[idx] = segment_completed
-                        self.frames_used[idx] = len(positions) if positions else 0
 
                         # Store detailed stats for this individual
                         self.individual_stats[idx] = {
@@ -405,7 +403,6 @@ class GeneticAlgorithm:
                             "inputs_to_finish_segment": inputs_to_finish_segment,
                             "distance_to_checkpoint": distance,
                             "fitness_score": fitness_score,
-                            "frames_used": len(positions) if positions else 0,
                         }
                         print(
                             f"Individual {idx}: wall_hits={wall_hits}, segment_completed={segment_completed}, inputs_to_finish_segment={inputs_to_finish_segment}, distance={distance:.2f}, fitness={fitness_score:.2f}"
@@ -458,16 +455,16 @@ class GeneticAlgorithm:
                 if gen_data["generation"] == generation_num:
                     summary["generations"][i] = {
                         "generation": generation_num,
-                        "best_individual_idx": best_idx,
-                        "best_individual_scores": best_stats,
+                        "best_generation_individual_idx": best_idx,
+                        "best_generation_individual_scores": best_stats,
                     }
                     break
         else:
             # Add new generation
             generation_data = {
                 "generation": generation_num,
-                "best_individual_idx": best_idx,
-                "best_individual_scores": best_stats,
+                "best_generation_individual_idx": best_idx,
+                "best_generation_individual_scores": best_stats,
             }
             summary["generations"].append(generation_data)
 
@@ -522,16 +519,17 @@ class GeneticAlgorithm:
 
         generations = [g["generation"] for g in summary["generations"]]
         fitness_scores = [
-            g["best_individual_scores"]["fitness_score"] for g in summary["generations"]
+            g["best_generation_individual_scores"]["fitness_score"]
+            for g in summary["generations"]
         ]
 
         # Handle input efficiency data - only include generations where segment was completed
         inputs_data = []
         completed_generations = []
         for g in summary["generations"]:
-            if g["best_individual_scores"]["segment_completed"]:
+            if g["best_generation_individual_scores"]["segment_completed"]:
                 inputs_data.append(
-                    g["best_individual_scores"]["inputs_to_finish_segment"]
+                    g["best_generation_individual_scores"]["inputs_to_finish_segment"]
                 )
                 completed_generations.append(g["generation"])
 
@@ -556,7 +554,7 @@ class GeneticAlgorithm:
         # Plot trajectories from all generations
         for g in summary["generations"]:
             gen_num = g["generation"]
-            ind_idx = g["best_individual_idx"]
+            ind_idx = g["best_generation_individual_idx"]
 
             trajectory_file = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/generation_{gen_num}/individual_{ind_idx}.json"
 
@@ -863,10 +861,13 @@ class GeneticAlgorithm:
             i for i, completed in enumerate(self.completion_status) if completed
         ]
         completed_ids = [f"Ind {i}" for i in completed_indices]
-        completed_frames = [self.frames_used[i] for i in completed_indices]
+        completed_inputs = [
+            self.individual_stats[i]["inputs_to_finish_segment"]
+            for i in completed_indices
+        ]
 
-        if completed_frames:  # Only plot if there are completed individuals
-            bars = ax3.bar(completed_ids, completed_frames, color="skyblue", alpha=0.7)
+        if completed_inputs:  # Only plot if there are completed individuals
+            bars = ax3.bar(completed_ids, completed_inputs, color="skyblue", alpha=0.7)
 
             # Add horizontal line for initial actions
             ax3.axhline(
@@ -885,11 +886,11 @@ class GeneticAlgorithm:
             ax3.legend(fontsize=9)
 
             # Add value labels on bars
-            for bar, frames in zip(bars, completed_frames):
+            for bar, inputs in zip(bars, completed_inputs):
                 ax3.text(
                     bar.get_x() + bar.get_width() / 2,
-                    bar.get_height() + max(completed_frames) * 0.02,
-                    str(frames),
+                    bar.get_height() + max(completed_inputs) * 0.02,
+                    str(inputs),
                     ha="center",
                     va="bottom",
                     fontsize=8,
@@ -943,7 +944,7 @@ def main():
     generations = int(sys.argv[3])
     segment = int(sys.argv[4])
     mutation_rate = 0.1
-    crossover_rate = 0.3
+    crossover_rate = 0.2
 
     ga = GeneticAlgorithm(
         track_name,
