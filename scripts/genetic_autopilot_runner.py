@@ -45,7 +45,6 @@ def main():
 
     action_sequences_path = sys.argv[1]
     track_name = sys.argv[2]
-    batch_mode = "--batch" in sys.argv
 
     # Parse optional arguments
     replay_file = None
@@ -55,8 +54,6 @@ def main():
     start_segment = None
 
     args = sys.argv[3:]
-    if batch_mode:
-        args = args[1:]  # Skip --batch
 
     i = 0
     while i < len(args):
@@ -104,9 +101,7 @@ def main():
         print(f"Error loading genetic autopilots: {e}")
         sys.exit(1)
 
-    # For non-batch, run only the first autopilot
-    if not batch_mode:
-        genetic_processor.autopilots = genetic_processor.autopilots[:1]
+
 
     # Prepare the game
     app, car = prepare_game_app(track_metadata)
@@ -127,7 +122,6 @@ def main():
     )
 
     # Set up the car with autopilot
-    car.batch_mode = batch_mode
     car.autopilot = genetic_processor
     genetic_processor.car = car
     genetic_processor.start_evaluation()

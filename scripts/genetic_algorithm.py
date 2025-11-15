@@ -233,15 +233,10 @@ class GeneticAlgorithm:
                 "scripts/genetic_autopilot_runner.py",
                 population_file,
                 self.track_name,
-                "--batch",
-                "--start_segment",
-                str(self.segment),
-                "--initial_angle",
-                str(self.initial_angle),
-                "--initial_speed",
-                str(self.initial_speed),
-                "--initial_position",
-                json.dumps(self.initial_position),
+                "--start_segment", str(self.segment),
+                "--initial_angle", str(self.initial_angle),
+                "--initial_speed", str(self.initial_speed),
+                "--initial_position", json.dumps(self.initial_position),
             ]
             if self.replay_file:
                 cmd.append(self.replay_file)
