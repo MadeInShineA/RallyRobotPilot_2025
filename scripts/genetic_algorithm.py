@@ -294,12 +294,16 @@ class GeneticAlgorithm:
     ) -> float:
         """Calculate fitness score from evaluation results"""
         # Reward closeness to next checkpoint, bonus for completion
-        base_fitness = distance_to_next
         if segment_completed:
-            base_fitness -= 1000.0  # bonus for completing
+            base_fitness = -1000
+        else:
+            base_fitness = distance_to_next
+
+        # TODO calcualted wall_hits
+        # wall_hits are always 0 for now
         wall_penalty = wall_hits * 10.0
 
-        fitness = base_fitness + wall_penalty
+        fitness = base_fitness + wall_penalty + inputs_to_finish_segment
         return fitness
 
     def _evaluate_population_in_game(self, generation: int) -> List[float]:
