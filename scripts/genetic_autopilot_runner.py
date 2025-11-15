@@ -52,6 +52,7 @@ def main():
     initial_speed = None
     initial_position = None
     start_segment = None
+    generation = 0
 
     args = sys.argv[3:]
 
@@ -68,6 +69,9 @@ def main():
             i += 2
         elif args[i] == "--start_segment":
             start_segment = int(args[i + 1])
+            i += 2
+        elif args[i] == "--generation":
+            generation = int(args[i + 1])
             i += 2
         else:
             if replay_file is None:
@@ -92,6 +96,7 @@ def main():
         genetic_processor = GeneticMsgProcessor(
             action_sequences_path=action_sequences_path,
             segment=start_segment,
+            generation=generation,
             initial_position=initial_position,
             initial_angle=initial_angle,
             initial_speed=initial_speed,

@@ -7,6 +7,11 @@ import subprocess
 import tempfile
 from typing import List, Tuple, Optional
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+from matplotlib.lines import Line2D
+import numpy as np
+from matplotlib.colors import Normalize
+import seaborn as sns
 
 
 class GeneticAlgorithm:
@@ -47,6 +52,8 @@ class GeneticAlgorithm:
         # Track best individual
         self.best_individual = None
         self.best_fitness = float("inf")
+        self.best_individual_idx = None
+        self.best_individual_stats = None
 
     def load_replay_data(
         self, replay_file: str
@@ -215,18 +222,33 @@ class GeneticAlgorithm:
 
             # Evaluate current population by launching the game
             print("Evaluating population in game...")
-            self.fitness_scores = self._evaluate_population_in_game()
+            self.fitness_scores = self._evaluate_population_in_game(generation + 1)
 
-            # Track best individual
+            # Track best individual for this generation
             min_fitness = min(self.fitness_scores)
+            best_idx = self.fitness_scores.index(min_fitness)
+            generation_best_stats = self.individual_stats[best_idx]
+
+            # Save this generation's data
+            self._save_generation_result(
+                generation + 1, best_idx, generation_best_stats
+            )
+
+            # Track overall best individual
             if min_fitness < self.best_fitness:
                 self.best_fitness = min_fitness
-                best_idx = self.fitness_scores.index(min_fitness)
                 self.best_individual = self.population[best_idx]
+                self.best_individual_idx = best_idx
+                self.best_individual_stats = generation_best_stats
+
+                # Update overall best individual in summary
+                self._update_overall_best(
+                    f"generation_{generation + 1}_individual_{best_idx}"
+                )
 
             print(".2f")
 
-            # Plot trajectories
+            # Create multiple analysis graphs
             if (
                 hasattr(self, "original_positions")
                 and self.original_positions
@@ -236,56 +258,20 @@ class GeneticAlgorithm:
                 print(
                     f"Debug: Plotting gen {generation + 1}, individual_positions len: {len(self.individual_positions)}, best_idx: {best_idx}"
                 )
-                for i, pos in enumerate(self.individual_positions):
-                    print(f"  Individual {i}: positions len {len(pos)}")
-                plt.figure()
-                # Plot all individual trajectories in light gray
-                for i, positions in enumerate(self.individual_positions):
-                    if positions:
-                        x = [p[0] for p in positions]
-                        z = [p[2] for p in positions]
-                        plt.plot(x, z, color="gray", alpha=0.3, linewidth=0.5)
-                # Plot best trajectory in red dashed
-                best_positions = (
-                    self.individual_positions[best_idx]
-                    if best_idx < len(self.individual_positions)
-                    and self.individual_positions[best_idx]
-                    else []
-                )
-                print(f"Debug: best_positions len: {len(best_positions)}")
-                if best_positions:
-                    x_best = [p[0] for p in best_positions]
-                    z_best = [p[2] for p in best_positions]
-                    plt.plot(
-                        x_best,
-                        z_best,
-                        color="red",
-                        linewidth=2,
-                        linestyle="--",
-                        label=f"Best Gen {generation + 1}",
-                    )
-                # Plot original trajectory in blue solid
-                x_orig = [p[0] for p in self.original_positions]
-                z_orig = [p[2] for p in self.original_positions]
-                plt.plot(
-                    x_orig,
-                    z_orig,
-                    color="blue",
-                    linewidth=2,
-                    label="Original Trajectory",
-                )
-                plt.xlabel("X")
-                plt.ylabel("Z")
-                plt.title(f"All Trajectories - Gen {generation + 1}")
-                plt.legend()
-                graph_dir = f"genetic_data/populations/{self.track_name}/graphs"
+
+                # Set seaborn style for the combined graph
+                sns.set_style("whitegrid")
+                sns.set_palette("husl")
+                sns.set_context("notebook", font_scale=1.0)
+
+                graph_dir = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/generation_{generation + 1}"
                 os.makedirs(graph_dir, exist_ok=True)
-                graph_path = (
-                    f"{graph_dir}/segment_{self.segment}_gen_{generation + 1}.png"
-                )
-                plt.savefig(graph_path)
-                plt.close()
-                print(f"Trajectories saved to {graph_path}")
+
+                # Create combined figure with subplots
+                self._plot_combined_analysis(generation + 1, best_idx, graph_dir)
+
+                # Reset seaborn style
+                sns.reset_defaults()
 
             # Evolve to next generation (except for last generation)
             if generation < self.generations - 1:
@@ -293,6 +279,10 @@ class GeneticAlgorithm:
 
         print("\nEvolution complete!")
         print(".2f")
+
+        # Generate summary plot
+        self._generate_summary_plot()
+
         self._save_results()
 
     def calculate_fitness(
@@ -312,7 +302,7 @@ class GeneticAlgorithm:
         fitness = base_fitness + wall_penalty
         return fitness
 
-    def _evaluate_population_in_game(self) -> List[float]:
+    def _evaluate_population_in_game(self, generation: int) -> List[float]:
         """Evaluate the entire population by launching the game"""
         # Save current population to a temporary file
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
@@ -329,6 +319,8 @@ class GeneticAlgorithm:
                 self.track_name,
                 "--start_segment",
                 str(self.segment),
+                "--generation",
+                str(generation),
                 "--initial_angle",
                 str(self.initial_angle),
                 "--initial_speed",
@@ -354,6 +346,9 @@ class GeneticAlgorithm:
             lines = result.stdout.strip().split("\n")
             fitness_dict = {}
             self.individual_positions = [[] for _ in range(len(self.population))]
+            self.completion_status = [False] * len(self.population)
+            self.frames_used = [0] * len(self.population)
+            self.individual_stats = [{}] * len(self.population)
 
             i = 0
             while i < len(lines):
@@ -400,6 +395,18 @@ class GeneticAlgorithm:
                         fitness_dict[idx] = fitness_score
 
                         self.individual_positions[idx] = positions
+                        self.completion_status[idx] = segment_completed
+                        self.frames_used[idx] = len(positions) if positions else 0
+
+                        # Store detailed stats for this individual
+                        self.individual_stats[idx] = {
+                            "wall_hits": wall_hits,
+                            "segment_completed": segment_completed,
+                            "inputs_to_finish_segment": inputs_to_finish_segment,
+                            "distance_to_checkpoint": distance,
+                            "fitness_score": fitness_score,
+                            "frames_used": len(positions) if positions else 0,
+                        }
                         print(
                             f"Individual {idx}: wall_hits={wall_hits}, segment_completed={segment_completed}, inputs_to_finish_segment={inputs_to_finish_segment}, distance={distance:.2f}, fitness={fitness_score:.2f}"
                         )
@@ -421,21 +428,505 @@ class GeneticAlgorithm:
             except:
                 pass
 
+    def _save_generation_result(self, generation_num, best_idx, best_stats):
+        """Save a specific generation's results to the summary file"""
+        os.makedirs(
+            f"genetic_data/populations/{self.track_name}/segment_{self.segment}",
+            exist_ok=True,
+        )
+        summary_file = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/summary.json"
+
+        # Load existing summary or create new one
+        if os.path.exists(summary_file):
+            with open(summary_file, "r") as f:
+                summary = json.load(f)
+        else:
+            summary = {
+                "track_name": self.track_name,
+                "population_size": self.population_size,
+                "mutation_rate": self.mutation_rate,
+                "crossover_rate": self.crossover_rate,
+                "overall_best_individual": None,
+                "generations": [],
+            }
+
+        # Check if this generation already exists (avoid duplicates)
+        existing_generations = [g["generation"] for g in summary["generations"]]
+        if generation_num in existing_generations:
+            # Update existing generation
+            for i, gen_data in enumerate(summary["generations"]):
+                if gen_data["generation"] == generation_num:
+                    summary["generations"][i] = {
+                        "generation": generation_num,
+                        "best_individual_idx": best_idx,
+                        "best_individual_scores": best_stats,
+                    }
+                    break
+        else:
+            # Add new generation
+            generation_data = {
+                "generation": generation_num,
+                "best_individual_idx": best_idx,
+                "best_individual_scores": best_stats,
+            }
+            summary["generations"].append(generation_data)
+
+        # Save updated summary
+        with open(summary_file, "w") as f:
+            json.dump(summary, f, indent=2)
+
+        print(f"Generation {generation_num} results saved to {summary_file}")
+
+    def _update_overall_best(self, overall_best_str):
+        """Update the overall best individual in the summary file"""
+        summary_file = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/summary.json"
+
+        if os.path.exists(summary_file):
+            with open(summary_file, "r") as f:
+                summary = json.load(f)
+
+            summary["overall_best_individual"] = overall_best_str
+
+            with open(summary_file, "w") as f:
+                json.dump(summary, f, indent=2)
+
+            print(f"Updated overall best individual to {overall_best_str}")
+
+    def _generate_summary_plot(self):
+        """Generate a comprehensive summary plot for all generations"""
+        summary_file = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/summary.json"
+
+        if not os.path.exists(summary_file):
+            print("No summary file found, cannot generate summary plot")
+            return
+
+        with open(summary_file, "r") as f:
+            summary = json.load(f)
+
+        if not summary.get("generations"):
+            print("No generations data found, cannot generate summary plot")
+            return
+
+        # Set seaborn style
+        sns.set_style("whitegrid")
+        sns.set_palette("husl")
+        sns.set_context("notebook", font_scale=1.1)
+
+        # Create figure with subplots using GridSpec for better control
+        fig = plt.figure(figsize=(16, 12))
+        gs = fig.add_gridspec(2, 2, hspace=0.3, wspace=0.3)
+        ax1 = fig.add_subplot(gs[0, :])  # Trajectory - full width top row
+        ax2 = fig.add_subplot(gs[1, 0])  # Fitness evolution
+        ax3 = fig.add_subplot(gs[1, 1])  # Input efficiency
+        ax4 = None  # No fourth subplot needed
+
+        generations = [g["generation"] for g in summary["generations"]]
+        fitness_scores = [
+            g["best_individual_scores"]["fitness_score"] for g in summary["generations"]
+        ]
+
+        # Handle input efficiency data - only include generations where segment was completed
+        inputs_data = []
+        completed_generations = []
+        for g in summary["generations"]:
+            if g["best_individual_scores"]["segment_completed"]:
+                inputs_data.append(
+                    g["best_individual_scores"]["inputs_to_finish_segment"]
+                )
+                completed_generations.append(g["generation"])
+
+        # Get original actions count (from initial segment data)
+        original_actions_count = (
+            len(self.original_positions) if hasattr(self, "original_positions") else 0
+        )
+
+        # 1. Original vs Best Trajectory Comparison (now ax1 - full width)
+        # Plot all best trajectories from each generation in light gray
+        overall_best = summary.get("overall_best_individual")
+        best_gen_num, best_ind_idx = None, None
+
+        if overall_best:
+            try:
+                gen_part, ind_part = overall_best.split("_individual_")
+                best_gen_num = int(gen_part.split("_")[1])
+                best_ind_idx = int(ind_part)
+            except (ValueError, IndexError):
+                pass
+
+        # Plot trajectories from all generations
+        for g in summary["generations"]:
+            gen_num = g["generation"]
+            ind_idx = g["best_individual_idx"]
+
+            trajectory_file = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/generation_{gen_num}/individual_{ind_idx}.json"
+
+            if os.path.exists(trajectory_file):
+                with open(trajectory_file, "r") as f:
+                    trajectory_data = json.load(f)
+
+                # Extract positions
+                traj_x = [frame.get("position", [0, 0, 0]) for frame in trajectory_data]
+                traj_x = [
+                    json.loads(pos)[0] if isinstance(pos, str) else pos[0]
+                    for pos in traj_x
+                ]
+                traj_z = [frame.get("position", [0, 0, 0]) for frame in trajectory_data]
+                traj_z = [
+                    json.loads(pos)[2] if isinstance(pos, str) else pos[2]
+                    for pos in traj_z
+                ]
+
+                # Check if this is the overall best
+                if gen_num == best_gen_num and ind_idx == best_ind_idx:
+                    # Highlight the overall best in blue
+                    ax1.plot(
+                        traj_x,
+                        traj_z,
+                        "blue",
+                        linewidth=4,
+                        label="Overall Best Individual",
+                        alpha=0.9,
+                        zorder=3,
+                    )
+                else:
+                    # Plot other generation bests in light gray
+                    ax1.plot(
+                        traj_x, traj_z, "lightgray", linewidth=2, alpha=0.5, zorder=1
+                    )
+
+        # Plot original trajectory (from initial segment data)
+        if hasattr(self, "original_positions") and self.original_positions:
+            orig_x = [p[0] for p in self.original_positions]
+            orig_z = [p[2] for p in self.original_positions]
+            ax1.plot(
+                orig_x,
+                orig_z,
+                "orange",
+                linewidth=3,
+                label="Original Trajectory",
+                alpha=0.8,
+                zorder=2,
+            )
+
+        # Add legend and labels
+        ax1.set_xlabel("X Position", fontsize=12)
+        ax1.set_ylabel("Z Position", fontsize=12)
+        ax1.set_title(
+            "Trajectory Evolution: Original vs All Generation Bests",
+            fontsize=14,
+            fontweight="bold",
+        )
+
+        # Create custom legend
+        legend_elements = [
+            Line2D([0], [0], color="orange", linewidth=3, label="Original Trajectory"),
+            Line2D(
+                [0],
+                [0],
+                color="lightgray",
+                linewidth=2,
+                alpha=0.5,
+                label="Generation Bests",
+            ),
+            Line2D([0], [0], color="blue", linewidth=4, label="Overall Best"),
+        ]
+        ax1.legend(handles=legend_elements, fontsize=10)
+
+        ax1.grid(True, alpha=0.3)
+        ax1.axis("equal")
+
+        # 2. Fitness Score over Generations (now ax2)
+        ax2.plot(
+            generations,
+            fitness_scores,
+            "b-o",
+            linewidth=3,
+            markersize=8,
+            label="Best Fitness",
+        )
+        ax2.set_xlabel("Generation", fontsize=12)
+        ax2.set_ylabel("Fitness Score", fontsize=12)
+        ax2.set_title("Fitness Evolution", fontsize=14, fontweight="bold")
+        # Set y-axis based on data range with padding
+        if fitness_scores:
+            y_min = min(fitness_scores)
+            y_max = max(fitness_scores)
+            y_range = y_max - y_min
+            ax2.set_ylim(bottom=y_min - y_range * 0.1, top=y_max + y_range * 0.1)
+        # Set x-axis to show all generations
+        ax2.set_xticks(generations)
+        ax2.grid(True, alpha=0.3)
+        ax2.legend()
+
+        # 3. Input to Complete Segment Evolution (ax3)
+        if inputs_data:
+            ax3.plot(
+                completed_generations,
+                inputs_data,
+                "g-o",
+                linewidth=3,
+                markersize=8,
+                label="Best Individual Inputs",
+            )
+            ax3.axhline(
+                y=original_actions_count,
+                color="red",
+                linestyle="--",
+                linewidth=3,
+                label=f"Original Actions ({original_actions_count})",
+            )
+            ax3.set_xlabel("Generation", fontsize=12)
+            ax3.set_ylabel("Inputs to Complete", fontsize=12)
+            ax3.set_title(
+                "Input Efficiency Evolution\n(Completed Segments Only)",
+                fontsize=14,
+                fontweight="bold",
+            )
+            # Set y-axis limits and ensure integer ticks
+            all_values = inputs_data + [original_actions_count]
+            y_min = min(all_values)
+            y_max = max(all_values)
+            y_range = y_max - y_min
+            ax3.set_ylim(
+                bottom=max(0, y_min - y_range * 0.1), top=y_max + y_range * 0.1
+            )
+            # Set integer ticks only
+            y_ticks = list(range(int(ax3.get_ylim()[0]), int(ax3.get_ylim()[1]) + 1))
+            ax3.set_yticks(y_ticks)
+            # Set x-axis to show completed generations
+            ax3.set_xticks(completed_generations)
+            ax3.legend()
+        else:
+            # No completed segments
+            ax3.text(
+                0.5,
+                0.5,
+                "No segments\ncompleted yet",
+                ha="center",
+                va="center",
+                transform=ax3.transAxes,
+                fontsize=14,
+                color="gray",
+            )
+            ax3.set_title(
+                "Input Efficiency Evolution\n(Completed Segments Only)",
+                fontsize=14,
+                fontweight="bold",
+            )
+
+        ax3.grid(True, alpha=0.3)
+
+        # No fourth subplot needed
+
+        # Overall title
+        total_generations = len(summary["generations"])
+        fig.suptitle(
+            f"Genetic Algorithm Summary - {summary['track_name']} Segment {self.segment} ({total_generations} Generations)\n"
+            f"Population: {summary['population_size']} | Mutation: {summary['mutation_rate']} | Crossover: {summary['crossover_rate']}",
+            fontsize=16,
+            fontweight="bold",
+            y=0.98,
+        )
+
+        plt.tight_layout()
+
+        # Save the plot
+        plot_file = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/summary.png"
+        plt.savefig(plot_file, dpi=150, bbox_inches="tight")
+        plt.close()
+
+        # Reset seaborn style
+        sns.reset_defaults()
+
+        print(f"Summary plot saved to {plot_file}")
+
     def _save_results(self):
-        """Save the best individual and final population"""
-        os.makedirs("genetic_data", exist_ok=True)
+        """Save final summary (legacy method, now handled per generation)"""
+        # This method is now redundant since we save after each generation
+        # But keep it for backward compatibility
+        pass
 
-        # Save best individual
-        best_file = f"genetic_data/{self.track_name}_best_individual.json"
-        with open(best_file, "w") as f:
-            json.dump(self.best_individual, f, indent=2)
+    def _plot_combined_analysis(self, generation, best_idx, graph_dir):
+        """Create combined figure with trajectory, completion, and frames analysis"""
+        fig = plt.figure(figsize=(16, 12))
 
-        # Save final population
-        population_file = f"genetic_data/{self.track_name}_population.json"
-        with open(population_file, "w") as f:
-            json.dump(self.population, f, indent=2)
+        # Create subplot grid: 2 rows, 2 columns
+        # Top row: trajectory (spans both columns)
+        # Bottom row: completion and frames
+        gs = fig.add_gridspec(2, 2, hspace=0.3, wspace=0.3)
+        ax1 = fig.add_subplot(gs[0, :])  # Trajectory - full width
+        ax2 = fig.add_subplot(gs[1, 0])  # Completion status
+        ax3 = fig.add_subplot(gs[1, 1])  # Frames comparison
 
-        print(f"Results saved to {best_file} and {population_file}")
+        # 1. Trajectory subplot (with all individuals)
+        # Plot all individual trajectories in light gray
+        for i, positions in enumerate(self.individual_positions):
+            if positions:
+                x = [p[0] for p in positions]
+                z = [p[2] for p in positions]
+                ax1.plot(x, z, color="lightgray", alpha=0.4, linewidth=1)
+
+        # Plot best trajectory
+        best_positions = (
+            self.individual_positions[best_idx]
+            if best_idx < len(self.individual_positions)
+            and self.individual_positions[best_idx]
+            else []
+        )
+
+        if best_positions:
+            x_best = [p[0] for p in best_positions]
+            z_best = [p[2] for p in best_positions]
+            ax1.plot(
+                x_best,
+                z_best,
+                color="blue",
+                linewidth=3,
+                label="Best Individual",
+                alpha=0.9,
+            )
+
+        # Plot original trajectory
+        x_orig = [p[0] for p in self.original_positions]
+        z_orig = [p[2] for p in self.original_positions]
+        ax1.plot(
+            x_orig,
+            z_orig,
+            color="orange",
+            linewidth=3,
+            label="Original Trajectory",
+            alpha=0.9,
+        )
+
+        ax1.set_xlabel("X Position", fontsize=11)
+        ax1.set_ylabel("Z Position", fontsize=11)
+        ax1.set_title(
+            f"Trajectory Analysis - Generation {generation}",
+            fontsize=13,
+            fontweight="bold",
+        )
+        ax1.legend(fontsize=10, loc="best")
+        ax1.grid(True, alpha=0.3)
+        ax1.axis("equal")
+
+        # 2. Completion status pie chart
+        completed_count = sum(self.completion_status)
+        failed_count = len(self.completion_status) - completed_count
+
+        if completed_count > 0 or failed_count > 0:
+            # Create pie chart
+            sizes = [completed_count, failed_count]
+            labels = [f"Completed\n({completed_count})", f"Failed\n({failed_count})"]
+            colors = ["green", "red"]
+            explode = (0.1, 0)  # explode the completed slice
+
+            pie_result = ax2.pie(
+                sizes,
+                explode=explode,
+                labels=labels,
+                colors=colors,
+                autopct="%1.1f%%",
+                shadow=False,
+                startangle=90,
+            )
+
+            # Style the text (pie returns wedges, texts, autotexts when autopct is used)
+            wedges, texts = pie_result[0], pie_result[1]
+            autotexts = pie_result[2] if len(pie_result) > 2 else []
+
+            for text in texts:
+                text.set_fontsize(10)
+                text.set_fontweight("bold")
+            for autotext in autotexts:
+                autotext.set_fontsize(9)
+                autotext.set_color("white")
+                autotext.set_fontweight("bold")
+
+            ax2.set_title("Completion Status", fontsize=12, fontweight="bold")
+        else:
+            ax2.text(
+                0.5,
+                0.5,
+                "No data",
+                ha="center",
+                va="center",
+                transform=ax2.transAxes,
+                fontsize=12,
+            )
+            ax2.set_title("Completion Status", fontsize=12, fontweight="bold")
+
+        # 3. Frames comparison subplot (only completed individuals)
+        initial_frames = len(self.original_positions)
+
+        # Filter to only completed individuals
+        completed_indices = [
+            i for i, completed in enumerate(self.completion_status) if completed
+        ]
+        completed_ids = [f"Ind {i}" for i in completed_indices]
+        completed_frames = [self.frames_used[i] for i in completed_indices]
+
+        if completed_frames:  # Only plot if there are completed individuals
+            bars = ax3.bar(completed_ids, completed_frames, color="skyblue", alpha=0.7)
+
+            # Add horizontal line for initial actions
+            ax3.axhline(
+                y=initial_frames,
+                color="red",
+                linestyle="--",
+                linewidth=2,
+                label=f"Initial ({initial_frames})",
+            )
+
+            ax3.set_xlabel("Individual", fontsize=11)
+            ax3.set_ylabel("Frames Used", fontsize=11)
+            ax3.set_title(
+                "Frames vs Initial\n(Completed Only)", fontsize=12, fontweight="bold"
+            )
+            ax3.legend(fontsize=9)
+
+            # Add value labels on bars
+            for bar, frames in zip(bars, completed_frames):
+                ax3.text(
+                    bar.get_x() + bar.get_width() / 2,
+                    bar.get_height() + max(completed_frames) * 0.02,
+                    str(frames),
+                    ha="center",
+                    va="bottom",
+                    fontsize=8,
+                )
+
+            ax3.tick_params(axis="x", rotation=45)
+            ax3.grid(True, alpha=0.3, axis="y")
+        else:
+            # No completed individuals
+            ax3.text(
+                0.5,
+                0.5,
+                "No individuals\ncompleted segment",
+                ha="center",
+                va="center",
+                transform=ax3.transAxes,
+                fontsize=12,
+                color="gray",
+            )
+            ax3.set_title(
+                "Frames vs Initial\n(Completed Only)", fontsize=12, fontweight="bold"
+            )
+            ax3.grid(True, alpha=0.3, axis="y")
+
+        # Overall title
+        fig.suptitle(
+            f"Genetic Algorithm Analysis - Segment {self.segment} - {self.track_name}",
+            fontsize=16,
+            fontweight="bold",
+            y=0.98,
+        )
+
+        # Save the combined figure
+        graph_path = f"{graph_dir}/analysis.png"
+        plt.savefig(graph_path, dpi=150, bbox_inches="tight")
+        plt.close()
+        print(f"Combined analysis graph saved to {graph_path}")
 
 
 def main():
