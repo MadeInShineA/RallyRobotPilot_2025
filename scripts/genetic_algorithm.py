@@ -220,16 +220,15 @@ class GeneticAlgorithm:
 
     def calculate_fitness(
         self,
-        lap_time: float,
         wall_hits: int,
-        checkpoints_passed: int,
-        lap_completed: bool,
+        segment_completed: bool,
+        inputs_to_finish_segment: int,
     ) -> float:
         """Calculate fitness score from evaluation results"""
-        # Example fitness function: minimize time, penalize wall hits, reward completion
-        base_fitness = lap_time
+        # Example fitness function: minimize inputs, penalize wall hits, reward completion
+        base_fitness = inputs_to_finish_segment if segment_completed else 1000.0
         wall_penalty = wall_hits * 10.0  # Adjust penalty as needed
-        completion_bonus = 50.0 if lap_completed else 0.0  # Adjust bonus as needed
+        completion_bonus = 50.0 if segment_completed else 0.0  # Adjust bonus as needed
 
         fitness = base_fitness + wall_penalty - completion_bonus
         return fitness
@@ -283,21 +282,17 @@ class GeneticAlgorithm:
                         idx = int(parts[1])
                         results_str = " ".join(
                             parts[3:]
-                        )  # lap_time wall_hits checkpoints_passed lap_completed
+                        )  # wall_hits segment_completed inputs_to_finish_segment
                         results_parts = results_str.split()
-                        lap_time = float(results_parts[0])
-                        wall_hits = int(results_parts[1])
-                        checkpoints_passed = int(results_parts[2])
-                        lap_completed = results_parts[3].lower() == "true"
+                        wall_hits = int(results_parts[0])
+                        segment_completed = results_parts[1].lower() == "true"
+                        inputs_to_finish_segment = int(results_parts[2])
 
                         fitness_score = self.calculate_fitness(
-                            lap_time, wall_hits, checkpoints_passed, lap_completed
+                            wall_hits, segment_completed, inputs_to_finish_segment
                         )
                         fitness_dict[idx] = fitness_score
-                        print(f"Individual {idx} finished with results {results_parts}")
-                        print(
-                            f"Individual {idx} finished with fitness score of {fitness_score}"
-                        )
+                        print(f"Individual {idx}: wall_hits={wall_hits}, segment_completed={segment_completed}, inputs_to_finish_segment={inputs_to_finish_segment}, fitness={fitness_score:.2f}")
                     except (ValueError, IndexError):
                         continue
 

@@ -22,12 +22,11 @@ class GeneticAutopilot:
 
         # Fitness tracking
         self.wall_hits = 0
-        self.checkpoints_passed = 0
-        self.lap_completed = False
-        self.total_time = 0.0
+        self.segment_completed = False
 
-        # Previous sensing data for wall detection
-        self.previous_raycasts: Optional[List[float]] = None
+        print(
+            f"Starting genetic autopilot evaluation with {len(self.action_sequence)} actions"
+        )
 
     def start_evaluation(self):
         """Start the evaluation run"""
@@ -36,23 +35,19 @@ class GeneticAutopilot:
         self.current_action_index = 0
         self.frame_counter = 0
         self.wall_hits = 0
-        self.checkpoints_passed = 0
-        self.lap_completed = False
-
-        print(
-            f"Starting genetic autopilot evaluation with {len(self.action_sequence)} actions"
-        )
+        self.segment_completed = False
 
     def stop_evaluation(self):
         """Stop the evaluation and return results"""
         self.total_time = time.time() - self.start_time
         self.is_running = False
 
+        self.inputs_to_finish_segment = self.current_action_index if self.segment_completed else len(self.action_sequence)
+
         results = {
-            "lap_time": self.total_time,
             "wall_hits": self.wall_hits,
-            "checkpoints_passed": self.checkpoints_passed,
-            "lap_completed": self.lap_completed,
+            "segment_completed": self.segment_completed,
+            "inputs_to_finish_segment": self.inputs_to_finish_segment,
         }
 
         return results
@@ -73,15 +68,12 @@ class GeneticAutopilot:
         if self._detect_wall_hit(sensing_data):
             self.wall_hits += 1
 
-        # Update checkpoint progress from sensing data
-        self.checkpoints_passed = sensing_data.checkpoints_passed
-
-        # Check lap completion (assuming lap completion when checkpoints_passed == total_checkpoints)
+        # Check segment completion (assuming segment completion when checkpoints_passed == total_checkpoints)
         if (
             sensing_data.checkpoints_passed >= sensing_data.total_checkpoints
             and sensing_data.total_checkpoints > 0
         ):
-            self.lap_completed = True
+            self.segment_completed = True
             self.stop_evaluation()
             return
 
@@ -219,7 +211,7 @@ class GeneticMsgProcessor:
             results = current_autopilot.stop_evaluation()
             self.results.append(results)
             print(
-                f"INDIVIDUAL {self.current_autopilot_index} RESULTS: {results['lap_time']} {results['wall_hits']} {results['checkpoints_passed']} {results['lap_completed']}"
+                f"INDIVIDUAL {self.current_autopilot_index} RESULTS: {results['wall_hits']} {results['segment_completed']} {results['inputs_to_finish_segment']}"
             )
             self.current_autopilot_index += 1
             if self.current_autopilot_index < len(self.autopilots):
@@ -315,7 +307,7 @@ class GeneticMsgProcessor:
             self.results.append(results)
             # Print results for GA to parse
             print(
-                f"INDIVIDUAL {self.current_autopilot_index} RESULTS: {results['lap_time']} {results['wall_hits']} {results['checkpoints_passed']} {results['lap_completed']}"
+                f"INDIVIDUAL {self.current_autopilot_index} RESULTS: {results['wall_hits']} {results['segment_completed']} {results['inputs_to_finish_segment']}"
             )
 
             self.current_autopilot_index += 1
