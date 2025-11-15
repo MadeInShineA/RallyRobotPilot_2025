@@ -218,6 +218,22 @@ class GeneticAlgorithm:
         print(".2f")
         self._save_results()
 
+    def calculate_fitness(
+        self,
+        lap_time: float,
+        wall_hits: int,
+        checkpoints_passed: int,
+        lap_completed: bool,
+    ) -> float:
+        """Calculate fitness score from evaluation results"""
+        # Example fitness function: minimize time, penalize wall hits, reward completion
+        base_fitness = lap_time
+        wall_penalty = wall_hits * 10.0  # Adjust penalty as needed
+        completion_bonus = 50.0 if lap_completed else 0.0  # Adjust bonus as needed
+
+        fitness = base_fitness + wall_penalty - completion_bonus
+        return fitness
+
     def _evaluate_population_in_game(self) -> List[float]:
         """Evaluate the entire population by launching the game"""
         # Save current population to a temporary file
@@ -233,10 +249,14 @@ class GeneticAlgorithm:
                 "scripts/genetic_autopilot_runner.py",
                 population_file,
                 self.track_name,
-                "--start_segment", str(self.segment),
-                "--initial_angle", str(self.initial_angle),
-                "--initial_speed", str(self.initial_speed),
-                "--initial_position", json.dumps(self.initial_position),
+                "--start_segment",
+                str(self.segment),
+                "--initial_angle",
+                str(self.initial_angle),
+                "--initial_speed",
+                str(self.initial_speed),
+                "--initial_position",
+                json.dumps(self.initial_position),
             ]
             if self.replay_file:
                 cmd.append(self.replay_file)
@@ -252,19 +272,31 @@ class GeneticAlgorithm:
                 return [1000.0] * len(self.population)
 
             # Parse results from stdout
-            # The genetic_autopilot_runner should output fitness scores
+            # The genetic_autopilot_runner should output results
             lines = result.stdout.strip().split("\n")
             fitness_dict = {}
 
             for line in lines:
-                if line.startswith("INDIVIDUAL") and "FITNESS:" in line:
+                if line.startswith("INDIVIDUAL") and "RESULTS:" in line:
                     parts = line.split()
                     try:
                         idx = int(parts[1])
-                        score = float(parts[3])
-                        fitness_dict[idx] = score
+                        results_str = " ".join(
+                            parts[3:]
+                        )  # lap_time wall_hits checkpoints_passed lap_completed
+                        results_parts = results_str.split()
+                        lap_time = float(results_parts[0])
+                        wall_hits = int(results_parts[1])
+                        checkpoints_passed = int(results_parts[2])
+                        lap_completed = results_parts[3].lower() == "true"
+
+                        fitness_score = self.calculate_fitness(
+                            lap_time, wall_hits, checkpoints_passed, lap_completed
+                        )
+                        fitness_dict[idx] = fitness_score
+                        print(f"Individual {idx} finished with results {results_parts}")
                         print(
-                            f"Individual {idx} finished with fitness score of {score}"
+                            f"Individual {idx} finished with fitness score of {fitness_score}"
                         )
                     except (ValueError, IndexError):
                         continue

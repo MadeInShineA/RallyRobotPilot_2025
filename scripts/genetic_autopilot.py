@@ -55,7 +55,6 @@ class GeneticAutopilot:
             "lap_completed": self.lap_completed,
         }
 
-        print(f"Evaluation complete: {results}")
         return results
 
     def update(self, sensing_data: SensingSnapshot):
@@ -219,7 +218,9 @@ class GeneticMsgProcessor:
         if not current_autopilot.is_running:
             results = current_autopilot.stop_evaluation()
             self.results.append(results)
-            print(f"INDIVIDUAL {self.current_autopilot_index} FITNESS: {results['lap_time']}")
+            print(
+                f"INDIVIDUAL {self.current_autopilot_index} RESULTS: {results['lap_time']} {results['wall_hits']} {results['checkpoints_passed']} {results['lap_completed']}"
+            )
             self.current_autopilot_index += 1
             if self.current_autopilot_index < len(self.autopilots):
                 print(f"Switching to individual {self.current_autopilot_index}")
@@ -242,7 +243,9 @@ class GeneticMsgProcessor:
             num_checkpoints = len(self.car.checkpoint_handler.lap_checkpoints)
             passed = set(range(self.segment + 1))
             self.car.checkpoint_handler.passed_checkpoints = passed
-            self.car.checkpoint_handler.next_checkpoint_index = (self.segment + 1) % num_checkpoints
+            self.car.checkpoint_handler.next_checkpoint_index = (
+                self.segment + 1
+            ) % num_checkpoints
             if self.car.checkpoint_handler.next_checkpoint_index == 0:
                 self.car.checkpoint_handler.lap_completed_checkpoints = True
             # Update visuals
@@ -310,8 +313,10 @@ class GeneticMsgProcessor:
             # Save results and move to next autopilot
             results = current_autopilot.stop_evaluation()
             self.results.append(results)
-            # Print fitness for GA to parse
-            print(f"INDIVIDUAL {self.current_autopilot_index} FITNESS: {results['lap_time']}")
+            # Print results for GA to parse
+            print(
+                f"INDIVIDUAL {self.current_autopilot_index} RESULTS: {results['lap_time']} {results['wall_hits']} {results['checkpoints_passed']} {results['lap_completed']}"
+            )
 
             self.current_autopilot_index += 1
             if self.current_autopilot_index < len(self.autopilots):
