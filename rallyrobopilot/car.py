@@ -458,6 +458,9 @@ class Car(Entity):
             if self.recording:
                 self.recorded_frames = []
                 self.recording_start_time = real_time.time()
+                # Enable rays for recording
+                if self.multiray_sensor:
+                    self.multiray_sensor.set_enabled_rays(True)
                 print("Recording started")
             else:
                 print("Recording stopped")
@@ -678,6 +681,11 @@ class Car(Entity):
                     "angle": self.rotation_y,
                     "speed": self.speed,
                     "position": json.dumps(list(self.position)),
+                    "raycasts": (
+                        self.multiray_sensor.collect_sensor_values()
+                        if self.multiray_sensor
+                        else []
+                    ),
                     "checkpoint": (
                         -1
                         if self.checkpoint_handler

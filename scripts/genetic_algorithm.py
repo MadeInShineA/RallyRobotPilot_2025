@@ -5,6 +5,7 @@ import lzma
 import pickle
 import subprocess
 import tempfile
+import math
 from typing import List, Tuple, Optional
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
@@ -55,26 +56,39 @@ class GeneticAlgorithm:
         self.best_individual_idx = None
         self.best_individual_stats = None
 
+        # Original raycasts for circuit drawing
+        self.original_raycasts = []
+
     def load_replay_data(
         self, replay_file: str
     ) -> Tuple[
-        List[Tuple[int, int, int, int]], List[Tuple[float, float, float]], List[float]
+        List[Tuple[int, int, int, int]], List[Tuple[float, float, float]], List[float], List[List[float]]
     ]:
         """
-        Load actions, positions, and angles from replay file.
-        Assumes replay is a list of SensingSnapshot objects.
-        Returns actions as tuples of booleans, positions as tuples, angles as floats.
+        Load actions, positions, angles, and raycasts from replay file.
+        Assumes replay is a list of SensingSnapshot objects or dicts.
+        Returns actions as tuples of booleans, positions as tuples, angles as floats, raycasts as lists.
         """
         with lzma.open(replay_file, "rb") as f:
             data = pickle.load(f)
         actions = []
         positions = []
         angles = []
+        raycasts = []
         for msg in data:
-            actions.append(tuple(msg.current_controls))
-            positions.append(tuple(msg.car_position))
-            angles.append(msg.car_angle)
-        return actions, positions, angles
+            if hasattr(msg, 'current_controls'):
+                # SensingSnapshot
+                actions.append(tuple(msg.current_controls))
+                positions.append(tuple(msg.car_position))
+                angles.append(msg.car_angle)
+                raycasts.append(list(msg.raycast_distances) if msg.raycast_distances else [])
+            else:
+                # Dict from manual recording
+                actions.append(tuple(msg['input']))
+                positions.append(tuple(json.loads(msg['position'])))
+                angles.append(msg['angle'])
+                raycasts.append(list(msg.get('raycasts', [])))
+        return actions, positions, angles, raycasts
 
     def mutate_actions(
         self, actions: List[Tuple[int, int, int, int]], mutation_rate: float = 0.3
@@ -106,9 +120,11 @@ class GeneticAlgorithm:
         """Create initial population by mutating base actions from segment"""
         # Load segment data
         segment_file = f"genetic_data/records/{self.track_name}/segments/segment_{self.segment}.json"
+        print(f"DEBUG _initialize_population: segment_file {segment_file} exists: {os.path.exists(segment_file)}")
         if os.path.exists(segment_file):
-            with open(segment_file, "r") as f:
+            with open(segment_file) as f:
                 data = json.load(f)
+            print(f"DEBUG: data loaded, len: {len(data)}")
             base_actions = [item["input"] for item in data]
             # Store initial conditions
             initial = data[0]
@@ -116,6 +132,9 @@ class GeneticAlgorithm:
             self.initial_speed = initial["speed"]
             self.initial_position = json.loads(initial["position"])
             self.original_positions = [json.loads(item["position"]) for item in data]
+            self.original_angles = [item["angle"] for item in data]
+            self.original_raycasts = [item.get("raycasts", []) for item in data]
+            print(f"DEBUG _initialize_population: data len: {len(data)}, original_raycasts len: {len(self.original_raycasts)}, first raycasts: {self.original_raycasts[0] if self.original_raycasts else 'empty'}")
             print(f"Using segment inputs from {segment_file} as base actions")
         else:
             print(f"No segment file found at {segment_file}")
@@ -493,8 +512,26 @@ class GeneticAlgorithm:
 
             print(f"Updated overall best individual to {overall_best_str}")
 
+    def _load_original_data(self):
+        """Load original segment data for plotting"""
+        segment_file = f"genetic_data/records/{self.track_name}/segments/segment_{self.segment}.json"
+        if os.path.exists(segment_file):
+            with open(segment_file) as f:
+                data = json.load(f)
+            self.original_positions = [json.loads(item["position"]) for item in data]
+            self.original_angles = [item["angle"] for item in data]
+            self.original_raycasts = [item.get("raycasts", []) for item in data]
+        else:
+            self.original_positions = []
+            self.original_angles = []
+            self.original_raycasts = []
+
     def _generate_summary_plot(self):
         """Generate a comprehensive summary plot for all generations"""
+        # Ensure original data is loaded
+        if not hasattr(self, "original_raycasts") or not self.original_raycasts:
+            self._load_original_data()
+
         summary_file = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/summary.json"
 
         if not os.path.exists(summary_file):
@@ -514,7 +551,7 @@ class GeneticAlgorithm:
         sns.set_context("notebook", font_scale=1.1)
 
         # Create figure with subplots using GridSpec for better control
-        fig = plt.figure(figsize=(16, 12))
+        fig = plt.figure(figsize=(16, 12), constrained_layout=True)
         gs = fig.add_gridspec(2, 2, hspace=0.3, wspace=0.3)
         ax1 = fig.add_subplot(gs[0, :])  # Trajectory - full width top row
         ax2 = fig.add_subplot(gs[1, 0])  # Fitness evolution
@@ -566,17 +603,13 @@ class GeneticAlgorithm:
                 with open(trajectory_file, "r") as f:
                     trajectory_data = json.load(f)
 
-                # Extract positions
-                traj_x = [frame.get("position", [0, 0, 0]) for frame in trajectory_data]
-                traj_x = [
-                    json.loads(pos)[0] if isinstance(pos, str) else pos[0]
-                    for pos in traj_x
-                ]
-                traj_z = [frame.get("position", [0, 0, 0]) for frame in trajectory_data]
-                traj_z = [
-                    json.loads(pos)[2] if isinstance(pos, str) else pos[2]
-                    for pos in traj_z
-                ]
+                # Extract positions, prepend initial if not present
+                positions = [frame.get("position", [0, 0, 0]) for frame in trajectory_data]
+                positions = [json.loads(pos) if isinstance(pos, str) else pos for pos in positions]
+                if positions and positions[0] != self.initial_position:
+                    positions.insert(0, self.initial_position)
+                traj_x = [pos[0] for pos in positions]
+                traj_z = [pos[2] for pos in positions]
 
                 # Check if this is the overall best
                 if gen_num == best_gen_num and ind_idx == best_ind_idx:
@@ -610,6 +643,64 @@ class GeneticAlgorithm:
                 zorder=2,
             )
 
+            # Plot circuit boundaries from raycasts with smoothing
+            if hasattr(self, "original_raycasts") and self.original_raycasts and hasattr(self, 'original_angles'):
+                print("DEBUG: Entering circuit boundary plotting")
+                nbr_rays = len(self.original_raycasts[0]) if self.original_raycasts else 0
+                if nbr_rays > 1:
+                    # Only use leftmost and rightmost rays for track borders
+                    border_rays = [0, nbr_rays - 1]
+                    # Collect distances for border rays
+                    dists_per_ray = [[] for _ in border_rays]
+                    for i in range(len(self.original_positions)):
+                        if i < len(self.original_raycasts) and self.original_raycasts[i]:
+                            raycasts = self.original_raycasts[i]
+                            for idx, j in enumerate(border_rays):
+                                if j < len(raycasts):
+                                    dists_per_ray[idx].append(raycasts[j])
+
+                    # Apply rolling window smoothing (window size 5)
+                    window_size = 5
+                    smoothed_dists = []
+                    for dists in dists_per_ray:
+                        smoothed = []
+                        for k in range(len(dists)):
+                            start = max(0, k - window_size // 2)
+                            end = min(len(dists), k + window_size // 2 + 1)
+                            smoothed.append(sum(dists[start:end]) / (end - start))
+                        smoothed_dists.append(smoothed)
+
+                    # Plot smoothed border lines
+                    half_angle = 90
+                    left_hits = []
+                    right_hits = []
+                    for i in range(len(self.original_positions)):
+                        if i < len(self.original_angles) and i < len(smoothed_dists[0]):
+                            car_x, car_y, car_z = self.original_positions[i]
+                            car_angle_rad = math.radians(self.original_angles[i])
+                            for idx, j in enumerate(border_rays):
+                                smoothed_dist = smoothed_dists[idx][i]
+                                if smoothed_dist < 99:
+                                    relative_angle = -half_angle + 2 * half_angle / (nbr_rays - 1) * j
+                                    angle_rad = math.radians(relative_angle) + car_angle_rad
+                                    hit_x = car_x + smoothed_dist * math.sin(angle_rad)
+                                    hit_z = car_z + smoothed_dist * math.cos(angle_rad)
+                                    if idx == 0:  # Left
+                                        left_hits.append((hit_x, hit_z))
+                                    else:  # Right
+                                        right_hits.append((hit_x, hit_z))
+                    if left_hits:
+                        left_xs, left_zs = zip(*left_hits)
+                        ax1.plot(left_xs, left_zs, 'black', linewidth=2, alpha=0.8, zorder=1, label='Left Border')
+                    if right_hits:
+                        right_xs, right_zs = zip(*right_hits)
+                        ax1.plot(right_xs, right_zs, 'black', linewidth=2, alpha=0.8, zorder=1, label='Right Border')
+                    total_points = len(left_hits) + len(right_hits)
+                    if total_points > 0:
+                        print(f"Plotted smoothed track borders with {total_points} points")
+                else:
+                    print("DEBUG: Not enough rays or data")
+
         # Add legend and labels
         ax1.set_xlabel("X Position", fontsize=12)
         ax1.set_ylabel("Z Position", fontsize=12)
@@ -632,6 +723,9 @@ class GeneticAlgorithm:
             ),
             Line2D([0], [0], color="blue", linewidth=4, label="Overall Best"),
         ]
+        # Add border legends
+        border_legend = [Line2D([0], [0], color='black', linewidth=2, label='Track Borders')]
+        legend_elements.extend(border_legend)
         ax1.legend(handles=legend_elements, fontsize=10)
 
         ax1.grid(True, alpha=0.3)
@@ -730,8 +824,6 @@ class GeneticAlgorithm:
             y=0.98,
         )
 
-        plt.tight_layout()
-
         # Save the plot
         plot_file = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/summary.png"
         plt.savefig(plot_file, dpi=150, bbox_inches="tight")
@@ -750,6 +842,10 @@ class GeneticAlgorithm:
 
     def _plot_combined_analysis(self, generation, best_idx, graph_dir):
         """Create combined figure with trajectory, completion, and frames analysis"""
+        # Ensure original data is loaded
+        if not hasattr(self, "original_raycasts") or not self.original_raycasts:
+            self._load_original_data()
+
         fig = plt.figure(figsize=(16, 12))
 
         # Create subplot grid: 2 rows, 2 columns
@@ -807,6 +903,54 @@ class GeneticAlgorithm:
             fontsize=13,
             fontweight="bold",
         )
+        # Add track borders
+        if hasattr(self, "original_raycasts") and self.original_raycasts and hasattr(self, 'original_angles'):
+            nbr_rays = len(self.original_raycasts[0]) if self.original_raycasts else 0
+            if nbr_rays > 1:
+                border_rays = [0, nbr_rays - 1]
+                dists_per_ray = [[] for _ in border_rays]
+                for i in range(len(self.original_positions)):
+                    if i < len(self.original_raycasts) and self.original_raycasts[i]:
+                        raycasts = self.original_raycasts[i]
+                        for idx, j in enumerate(border_rays):
+                            if j < len(raycasts):
+                                dists_per_ray[idx].append(raycasts[j])
+
+                window_size = 5
+                smoothed_dists = []
+                for dists in dists_per_ray:
+                    smoothed = []
+                    for k in range(len(dists)):
+                        start = max(0, k - window_size // 2)
+                        end = min(len(dists), k + window_size // 2 + 1)
+                        smoothed.append(sum(dists[start:end]) / (end - start))
+                    smoothed_dists.append(smoothed)
+
+                half_angle = 90
+                left_hits = []
+                right_hits = []
+                for i in range(len(self.original_positions)):
+                    if i < len(self.original_angles) and i < len(smoothed_dists[0]):
+                        car_x, car_y, car_z = self.original_positions[i]
+                        car_angle_rad = math.radians(self.original_angles[i])
+                        for idx, j in enumerate(border_rays):
+                            smoothed_dist = smoothed_dists[idx][i]
+                            if smoothed_dist < 99:
+                                relative_angle = -half_angle + 2 * half_angle / (nbr_rays - 1) * j
+                                angle_rad = math.radians(relative_angle) + car_angle_rad
+                                hit_x = car_x + smoothed_dist * math.sin(angle_rad)
+                                hit_z = car_z + smoothed_dist * math.cos(angle_rad)
+                                if idx == 0:
+                                    left_hits.append((hit_x, hit_z))
+                                else:
+                                    right_hits.append((hit_x, hit_z))
+                if left_hits:
+                    left_xs, left_zs = zip(*left_hits)
+                    ax1.plot(left_xs, left_zs, 'black', linewidth=2, alpha=0.8, zorder=1)
+                if right_hits:
+                    right_xs, right_zs = zip(*right_hits)
+                    ax1.plot(right_xs, right_zs, 'black', linewidth=2, alpha=0.8, zorder=1)
+
         ax1.legend(fontsize=10, loc="best")
         ax1.grid(True, alpha=0.3)
         ax1.axis("equal")
