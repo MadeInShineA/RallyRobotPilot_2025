@@ -204,7 +204,7 @@ class Car(Entity):
 
         # Recording
         self.recording = False
-        self.recorded_keys = []
+        self.recorded_frames = []
         self.frame_idx = 0
         self.recording_start_time = 0.0
         self.last_real_time = real_time.time()
@@ -456,7 +456,7 @@ class Car(Entity):
             self.r_pressed = True
             self.recording = not self.recording
             if self.recording:
-                self.recorded_keys = []
+                self.recorded_frames = []
                 self.recording_start_time = real_time.time()
                 print("Recording started")
             else:
@@ -467,18 +467,19 @@ class Car(Entity):
                 os.makedirs(path, exist_ok=True)
                 complete_path = f"{path}complete_record.json"
                 with open(complete_path, "w") as f:
-                    json.dump(self.recorded_keys, f)
+                    json.dump(self.recorded_frames, f)
                 print(f"Complete record saved to {complete_path}")
 
-                # Split into segments
+                # Split into segments (only from first lap)
                 segments_path = f"{path}segments/"
                 os.makedirs(segments_path, exist_ok=True)
                 from collections import defaultdict
 
                 checkpoint_to_frames = defaultdict(list)
-                for frame in self.recorded_keys:
-                    cp = frame["checkpoint"]
-                    checkpoint_to_frames[cp].append(frame)
+                for frame in self.recorded_frames:
+                    if frame.get("lap", -1) == 0:  # Only first lap
+                        cp = frame["checkpoint"]
+                        checkpoint_to_frames[cp].append(frame)
                 segments = sorted(checkpoint_to_frames.keys())
                 for i, cp in enumerate(segments):
                     segment_data = checkpoint_to_frames[cp]
@@ -664,7 +665,7 @@ class Car(Entity):
 
         # Record keys if recording
         if self.recording:
-            self.recorded_keys.append(
+            self.recorded_frames.append(
                 {
                     "idx": self.frame_idx,
                     "time": real_time.time() - self.recording_start_time,
@@ -677,9 +678,22 @@ class Car(Entity):
                     "angle": self.rotation_y,
                     "speed": self.speed,
                     "position": json.dumps(list(self.position)),
-                    "checkpoint": self.checkpoint_handler.next_checkpoint_index
-                    if self.checkpoint_handler
-                    else 0,
+                    "checkpoint": (
+                        -1
+                        if self.checkpoint_handler
+                        and len(self.checkpoint_handler.passed_checkpoints) == 0
+                        else self.checkpoint_handler.next_checkpoint_index - 1
+                        if self.checkpoint_handler
+                        else -1
+                    ),
+                    "lap": (
+                        -1
+                        if self.checkpoint_handler
+                        and len(self.checkpoint_handler.passed_checkpoints) == 0
+                        else self.checkpoint_handler.current_lap
+                        if self.checkpoint_handler
+                        else -1
+                    ),
                 }
             )
             self.frame_idx += 1
