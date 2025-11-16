@@ -147,9 +147,6 @@ class Car(Entity):
             text="", origin=(0, 0), size=0.05, scale=(1, 1), position=(-0.7, 0.43)
         )
 
-        self.laps_text = Text(
-            text="", origin=(0, 0), size=0.05, scale=(1.1, 1.1), position=(0, 0.43)
-        )
         self.reset_count_timer = Text(
             text=str(round(self.reset_count, 1)),
             origin=(0, 0),
@@ -160,7 +157,6 @@ class Car(Entity):
 
         self.timer.disable()
 
-        self.laps_text.disable()
         self.reset_count_timer.disable()
 
         self.gamemode = "race"
@@ -412,12 +408,14 @@ class Car(Entity):
             self.tab_pressed = True
             self.checkpoint_mode = not self.checkpoint_mode
             if self.checkpoint_mode:
+                self.checkpoint_handler.ui_enabled = True
                 self.checkpoint_handler.show_ui()
                 if self.multiray_sensor:
                     self.multiray_sensor.set_enabled_rays(True)
                 self.mode_text.enable()
                 print("Checkpoint mode enabled")
             else:
+                self.checkpoint_handler.ui_enabled = False
                 self.checkpoint_handler.hide_ui()
                 if self.multiray_sensor:
                     self.multiray_sensor.set_enabled_rays(False)
@@ -611,12 +609,6 @@ class Car(Entity):
         if self.checkpoint_handler:
             self.checkpoint_handler.update()
             self.checkpoint_handler.check_passed_checkpoints(self.position)
-            lap_info = self.checkpoint_handler.get_lap_info()
-            if lap_info["total_checkpoints"] > 0:
-                self.laps_text.text = f"Lap {lap_info['current_lap'] + 1}: {lap_info['checkpoints_passed']}/{lap_info['total_checkpoints']}"
-                self.laps_text.enable()
-            else:
-                self.laps_text.disable()
 
         # Update autopilot if present
         if hasattr(self, "autopilot") and self.autopilot:

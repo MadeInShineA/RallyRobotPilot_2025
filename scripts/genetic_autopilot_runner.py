@@ -134,6 +134,7 @@ def main():
 
     # Show checkpoints and rays for visualization
     if car.checkpoint_handler:
+        car.checkpoint_handler.ui_enabled = True
         car.checkpoint_handler.show_ui()
     if car.multiray_sensor:
         car.multiray_sensor.set_enabled_rays(True)

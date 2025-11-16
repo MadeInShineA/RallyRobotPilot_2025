@@ -30,14 +30,22 @@ class CheckpointHandler:
         self.previous_car_position = None
 
         # UI elements
-        self.status_text = Text(
-            text="", position=(-0.85, -0.45), scale=0.6, color=color.white
-        )
-
         self.feedback_text = Text(
             text="", position=(0, 0.35), scale=0.8, color=color.green
         )
         self.feedback_text.disable()  # Start disabled
+
+        self.lap_text = Text(
+            text="",
+            position=(0, 0.45),
+            scale=(0.8, 0.8),
+            color=color.white,
+            origin=(0.0, 0.0),
+            size=0.05,
+        )
+        self.lap_text.disable()  # Start disabled
+
+        self.ui_enabled = False  # Flag to control UI visibility
 
         # Load existing checkpoints if any
         self.load_checkpoints()
@@ -347,22 +355,25 @@ class CheckpointHandler:
 
     def update_status_text(self):
         """Update the status text with current lap info"""
-        if hasattr(self, "status_text"):
-            lap_info = f"Lap {self.current_lap + 1}"
-            if self.lap_checkpoints:
-                lap_info += (
-                    f" ({len(self.passed_checkpoints)}/{len(self.lap_checkpoints)})"
-                )
-            self.status_text.text = lap_info
+        # Removed status text
+        pass
 
     def show_ui(self):
         """Show checkpoint UI"""
-        self.status_text.enable()
-        self.update_status_text()
+        if self.ui_enabled:
+            self.update_status_text()
+            for entity_data in self.checkpoint_entities:
+                entity_data["entity"].enable()
+                entity_data["text"].enable()
+            self.lap_text.enable()
 
     def hide_ui(self):
         """Hide checkpoint UI"""
-        self.status_text.disable()
+        self.feedback_text.disable()
+        self.lap_text.disable()
+        for entity_data in self.checkpoint_entities:
+            entity_data["entity"].disable()
+            entity_data["text"].disable()
 
     def check_passed_checkpoints(self, car_position):
         """Check if car has passed through any checkpoints"""
@@ -535,4 +546,12 @@ class CheckpointHandler:
 
     def update(self):
         """Update method to be called in the game loop"""
-        pass  # Removed glow animation for simplicity
+        if self.ui_enabled:
+            lap_info = self.get_lap_info()
+            if lap_info["total_checkpoints"] > 0:
+                self.lap_text.text = f"Lap {lap_info['current_lap'] + 1}: {lap_info['checkpoints_passed']}/{lap_info['total_checkpoints']}"
+            else:
+                self.lap_text.disable()
+        else:
+            self.lap_text.disable()
+        # Removed glow animation for simplicity

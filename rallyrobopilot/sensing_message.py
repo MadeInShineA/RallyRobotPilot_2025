@@ -33,7 +33,7 @@ class SensingSnapshot:
         nbr_raycasts = len(self.raycast_distances)
         byte_data += struct.pack(">B" + "f" * nbr_raycasts, nbr_raycasts, *self.raycast_distances)
 
-        byte_data += struct.pack(">iiiiid", self.collision_counter, self.lap_current, self.checkpoints_passed, self.total_checkpoints, self.timestamp)
+        byte_data += struct.pack(">iiiid", self.collision_counter, self.lap_current, self.checkpoints_passed, self.total_checkpoints, self.timestamp)
 
         if self.image is not None:
             byte_data += struct.pack(">ii", self.image.shape[0], self.image.shape[1])
@@ -53,7 +53,7 @@ class SensingSnapshot:
         (nbr_raycasts,), data = iter_unpack(">B", data)
         self.raycast_distances, data = iter_unpack(">" + "f" * nbr_raycasts, data)
 
-        (self.collision_counter, self.lap_current, self.checkpoints_passed, self.total_checkpoints, self.timestamp), data = iter_unpack(">iiiiid", data)
+        (self.collision_counter, self.lap_current, self.checkpoints_passed, self.total_checkpoints, self.timestamp), data = iter_unpack(">iiiid", data)
 
         (h,w), data = iter_unpack(">ii", data)
 
