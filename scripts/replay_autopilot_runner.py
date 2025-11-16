@@ -130,14 +130,14 @@ def save_record(recorded_data, fid):
 
 def main():
     if len(sys.argv) < 3:
-        print("Usage: python replay_autopilot_runner.py <frames.json> <track_name>")
+        print("Usage: python replay_autopilot_runner.py <track_name> <frames.json>")
         print(
-            "Example: python replay_autopilot_runner.py records/record_0/segments/record_0_segment_0.json SimpleTrack"
+            "Example: python replay_autopilot_runner.py SimpleTrack records/record_0/segments/record_0_segment_0.json"
         )
         sys.exit(1)
 
-    frames_file = sys.argv[1]
-    track_name = sys.argv[2]
+    track_name = sys.argv[1]
+    frames_file = sys.argv[2]
 
     if not os.path.exists(frames_file):
         print(f"Error: Frames file '{frames_file}' not found")
