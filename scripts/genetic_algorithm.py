@@ -561,6 +561,8 @@ class GeneticAlgorithm:
                         "generation": generation_num,
                         "best_generation_individual_idx": best_idx,
                         "best_generation_individual_scores": best_stats,
+                        "all_fitness_scores": self.fitness_scores.copy(),
+                        "all_individual_stats": self.individual_stats.copy(),
                     }
                     break
         else:
@@ -569,6 +571,8 @@ class GeneticAlgorithm:
                 "generation": generation_num,
                 "best_generation_individual_idx": best_idx,
                 "best_generation_individual_scores": best_stats,
+                "all_fitness_scores": self.fitness_scores.copy(),
+                "all_individual_stats": self.individual_stats.copy(),
             }
             summary["generations"].append(generation_data)
 
@@ -606,7 +610,7 @@ class GeneticAlgorithm:
             self.original_angles = []
 
     def _generate_summary_plot(self):
-        """Generate a comprehensive summary plot for all generations"""
+        """Generate three separated summary plots for all generations"""
         # Ensure original data is loaded
 
         summary_file = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/summary.json"
@@ -626,14 +630,6 @@ class GeneticAlgorithm:
         sns.set_style("whitegrid")
         sns.set_palette("husl")
         sns.set_context("notebook", font_scale=1.1)
-
-        # Create figure with subplots using GridSpec for better control
-        fig = plt.figure(figsize=(16, 12), constrained_layout=True)
-        gs = fig.add_gridspec(2, 2, hspace=0.3, wspace=0.3)
-        ax1 = fig.add_subplot(gs[0, :])  # Trajectory - full width top row
-        ax2 = fig.add_subplot(gs[1, 0])  # Fitness evolution
-        ax3 = fig.add_subplot(gs[1, 1])  # Input efficiency
-        ax4 = None  # No fourth subplot needed
 
         generations = [g["generation"] for g in summary["generations"]]
         fitness_scores = [
@@ -656,8 +652,8 @@ class GeneticAlgorithm:
             len(self.original_positions) if hasattr(self, "original_positions") else 0
         )
 
-        # 1. Original vs Best Trajectory Comparison (now ax1 - full width)
-        # Plot all best trajectories from each generation in light gray
+        # Plot 1: Trajectory Evolution
+        fig1, ax1 = plt.subplots(figsize=(12, 8))
         overall_best = summary.get("overall_best_individual")
         best_gen_num, best_ind_idx = None, None
 
@@ -832,8 +828,24 @@ class GeneticAlgorithm:
             ax1.set_xlim(min(all_x) - margin, max(all_x) + margin)
             ax1.set_ylim(min(all_z) - margin, max(all_z) + margin)
 
-        # 2. Fitness Score over Generations (now ax2)
-        ax2.plot(
+        # Overall title
+        total_generations = len(summary["generations"])
+        fig1.suptitle(
+            f"Trajectory Evolution - {summary['track_name']} Segment {self.segment} ({total_generations} Generations)",
+            fontsize=16,
+            fontweight="bold",
+            y=0.98,
+        )
+
+        # Save the plot
+        plot_file1 = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/summary_trajectory.png"
+        plt.savefig(plot_file1, dpi=150, bbox_inches="tight")
+        plt.close()
+
+        # Plot 2: Fitness Evolution with subplots
+        fig2, (ax2a, ax2b) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
+        # Best fitness
+        ax2a.plot(
             generations,
             fitness_scores,
             "b-o",
@@ -841,23 +853,50 @@ class GeneticAlgorithm:
             markersize=8,
             label="Best Fitness",
         )
-        ax2.set_xlabel("Generation", fontsize=12)
-        ax2.set_ylabel("Fitness Score", fontsize=12)
-        ax2.set_title("Fitness Evolution", fontsize=14, fontweight="bold")
-        # Set y-axis based on data range with padding
-        if fitness_scores:
-            y_min = min(fitness_scores)
-            y_max = max(fitness_scores)
-            y_range = y_max - y_min
-            ax2.set_ylim(bottom=y_min - y_range * 0.1, top=y_max + y_range * 0.1)
-        # Set x-axis to show all generations
-        ax2.set_xticks(generations)
-        ax2.grid(True, alpha=0.3)
-        ax2.legend()
+        ax2a.set_ylabel("Best Fitness Score", fontsize=12)
+        ax2a.set_title("Best Fitness Evolution", fontsize=14, fontweight="bold")
+        ax2a.grid(True, alpha=0.3)
+        ax2a.legend()
 
-        # 3. Input to Complete Segment Evolution (ax3)
+        # Mean fitness
+        mean_fitness_scores = []
+        for g in summary["generations"]:
+            if "all_fitness_scores" in g:
+                mean_fitness_scores.append(np.mean(g["all_fitness_scores"]))
+            else:
+                mean_fitness_scores.append(g["best_generation_individual_scores"]["fitness_score"])  # fallback
+
+        ax2b.plot(
+            generations,
+            mean_fitness_scores,
+            "r-s",
+            linewidth=3,
+            markersize=8,
+            label="Mean Fitness",
+        )
+        ax2b.set_xlabel("Generation", fontsize=12)
+        ax2b.set_ylabel("Mean Fitness Score", fontsize=12)
+        ax2b.set_title("Mean Fitness Evolution", fontsize=14, fontweight="bold")
+        ax2b.set_xticks(generations)
+        ax2b.grid(True, alpha=0.3)
+        ax2b.legend()
+
+        fig2.suptitle(
+            f"Fitness Evolution - {summary['track_name']} Segment {self.segment} ({total_generations} Generations)",
+            fontsize=16,
+            fontweight="bold",
+            y=0.98,
+        )
+
+        plot_file2 = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/summary_fitness.png"
+        plt.savefig(plot_file2, dpi=150, bbox_inches="tight")
+        plt.close()
+
+        # Plot 3: Input Efficiency Evolution with subplots
+        fig3, (ax3a, ax3b) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
         if inputs_data:
-            ax3.plot(
+            # Best inputs
+            ax3a.plot(
                 completed_generations,
                 inputs_data,
                 "g-o",
@@ -865,75 +904,114 @@ class GeneticAlgorithm:
                 markersize=8,
                 label="Best Individual Inputs",
             )
-            ax3.axhline(
+            ax3a.axhline(
                 y=original_actions_count,
                 color="red",
                 linestyle="--",
                 linewidth=3,
                 label=f"Original Actions ({original_actions_count})",
             )
-            ax3.set_xlabel("Generation", fontsize=12)
-            ax3.set_ylabel("Inputs to Complete", fontsize=12)
-            ax3.set_title(
-                "Input Efficiency Evolution\n(Completed Segments Only)",
+            ax3a.set_ylabel("Best Inputs to Complete", fontsize=12)
+            ax3a.set_title(
+                "Best Input Efficiency Evolution\n(Completed Segments Only)",
                 fontsize=14,
                 fontweight="bold",
             )
-            # Set y-axis limits and ensure integer ticks
-            all_values = inputs_data + [original_actions_count]
-            y_min = min(all_values)
-            y_max = max(all_values)
-            y_range = y_max - y_min
-            ax3.set_ylim(
-                bottom=max(0, y_min - y_range * 0.1), top=y_max + y_range * 0.1
-            )
-            # Set integer ticks only
-            y_ticks = list(range(int(ax3.get_ylim()[0]), int(ax3.get_ylim()[1]) + 1))
-            ax3.set_yticks(y_ticks)
-            # Set x-axis to show completed generations
-            ax3.set_xticks(completed_generations)
-            ax3.legend()
+            ax3a.grid(True, alpha=0.3)
+            ax3a.legend()
+
+            # Mean inputs for completed
+            mean_inputs_data = []
+            for g in summary["generations"]:
+                if g["best_generation_individual_scores"]["segment_completed"] and "all_individual_stats" in g:
+                    completed_inputs = [
+                        stat["inputs_to_finish_segment"]
+                        for stat in g["all_individual_stats"]
+                        if stat["segment_completed"]
+                    ]
+                    if completed_inputs:
+                        mean_inputs_data.append(np.mean(completed_inputs))
+                    else:
+                        mean_inputs_data.append(g["best_generation_individual_scores"]["inputs_to_finish_segment"])
+                elif g["best_generation_individual_scores"]["segment_completed"]:
+                    mean_inputs_data.append(g["best_generation_individual_scores"]["inputs_to_finish_segment"])
+
+            if mean_inputs_data:
+                ax3b.plot(
+                    completed_generations,
+                    mean_inputs_data,
+                    "m-^",
+                    linewidth=3,
+                    markersize=8,
+                    label="Mean Inputs (Completed)",
+                )
+                ax3b.axhline(
+                    y=original_actions_count,
+                    color="red",
+                    linestyle="--",
+                    linewidth=3,
+                    label=f"Original Actions ({original_actions_count})",
+                )
+                ax3b.set_xlabel("Generation", fontsize=12)
+                ax3b.set_ylabel("Mean Inputs to Complete", fontsize=12)
+                ax3b.set_title(
+                    "Mean Input Efficiency Evolution\n(Completed Segments Only)",
+                    fontsize=14,
+                    fontweight="bold",
+                )
+                ax3b.set_xticks(completed_generations)
+                ax3b.grid(True, alpha=0.3)
+                ax3b.legend()
+            else:
+                ax3b.text(
+                    0.5,
+                    0.5,
+                    "No data",
+                    ha="center",
+                    va="center",
+                    transform=ax3b.transAxes,
+                    fontsize=14,
+                    color="gray",
+                )
+                ax3b.set_title(
+                    "Mean Input Efficiency Evolution\n(Completed Segments Only)",
+                    fontsize=14,
+                    fontweight="bold",
+                )
         else:
             # No completed segments
-            ax3.text(
-                0.5,
-                0.5,
-                "No segments\ncompleted yet",
-                ha="center",
-                va="center",
-                transform=ax3.transAxes,
-                fontsize=14,
-                color="gray",
-            )
-            ax3.set_title(
-                "Input Efficiency Evolution\n(Completed Segments Only)",
-                fontsize=14,
-                fontweight="bold",
-            )
+            for ax in [ax3a, ax3b]:
+                ax.text(
+                    0.5,
+                    0.5,
+                    "No segments\ncompleted yet",
+                    ha="center",
+                    va="center",
+                    transform=ax.transAxes,
+                    fontsize=14,
+                    color="gray",
+                )
+                ax.set_title(
+                    "Input Efficiency Evolution\n(Completed Segments Only)",
+                    fontsize=14,
+                    fontweight="bold",
+                )
 
-        ax3.grid(True, alpha=0.3)
-
-        # No fourth subplot needed
-
-        # Overall title
-        total_generations = len(summary["generations"])
-        fig.suptitle(
-            f"Genetic Algorithm Summary - {summary['track_name']} Segment {self.segment} ({total_generations} Generations)\n"
-            f"Population: {summary['population_size']} | Mutation: {summary['mutation_rate']} | Crossover: {summary['crossover_rate']}",
+        fig3.suptitle(
+            f"Input Efficiency - {summary['track_name']} Segment {self.segment} ({total_generations} Generations)",
             fontsize=16,
             fontweight="bold",
             y=0.98,
         )
 
-        # Save the plot
-        plot_file = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/summary.png"
-        plt.savefig(plot_file, dpi=150, bbox_inches="tight")
+        plot_file3 = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/summary_efficiency.png"
+        plt.savefig(plot_file3, dpi=150, bbox_inches="tight")
         plt.close()
 
         # Reset seaborn style
         sns.reset_defaults()
 
-        print(f"Summary plot saved to {plot_file}")
+        print(f"Summary plots saved to {plot_file1}, {plot_file2}, {plot_file3}")
 
     def _save_results(self):
         """Save final summary (legacy method, now handled per generation)"""
