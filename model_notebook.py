@@ -31,7 +31,6 @@ def _():
     from torch.utils.data import DataLoader, TensorDataset
     from sklearn.model_selection import KFold
     import seaborn as sns
-
     return (
         DataLoader,
         KFold,
@@ -113,9 +112,7 @@ def _(lzma, os, pickle, pl):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""### Clean the first frames of each record when nothing happens (all inputs are 0)"""
-    )
+    mo.md(r"""### Clean the first frames of each record when nothing happens (all inputs are 0)""")
     return
 
 

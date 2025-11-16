@@ -11,36 +11,6 @@ import lzma
 from typing import List
 
 
-def segment_by_checkpoints(snapshots: List) -> List[List]:
-    """
-    Segment the snapshots into lists based on checkpoint passages.
-    Returns a list of segments, where each segment is the data between checkpoints.
-    """
-    if not snapshots:
-        return []
-
-    segments = []
-    current_segment = []
-    last_checkpoint_count = 0
-
-    for snapshot in snapshots:
-        current_checkpoints = getattr(snapshot, "checkpoints_passed", 0)
-
-        # If checkpoint count increased, start a new segment
-        if current_checkpoints > last_checkpoint_count:
-            if current_segment:
-                segments.append(current_segment)
-            current_segment = [snapshot]
-            last_checkpoint_count = current_checkpoints
-        else:
-            current_segment.append(snapshot)
-
-    # Add the last segment
-    if current_segment:
-        segments.append(current_segment)
-
-    return segments
-
 
 class DataCollectionUI(QtWidgets.QMainWindow):
     def __init__(self, message_processing_callback=None):
@@ -191,24 +161,19 @@ class DataCollectionUI(QtWidgets.QMainWindow):
 
         self.saveRecordButton.setText("Saving ...")
 
-        os.makedirs("./records", exist_ok=True)
+        base_dir = "./visual_records" if self.saveImgCheckBox.isChecked() else "./records"
+        os.makedirs(base_dir, exist_ok=True)
 
         # Find next available record number
-        record_name = "./records/record_%d.npz"
+        record_name = f"{base_dir}/record_%d.npz"
         fid = 0
         while os.path.exists(record_name % fid):
             fid += 1
 
-        record_dir = f"./records/record_{fid}"
-        os.makedirs(record_dir, exist_ok=True)
-        os.makedirs(f"{record_dir}/segments", exist_ok=True)
-
         class ThreadedSaver(QtCore.QThread):
-            def __init__(self, record_path, segment_dir, record_name, data):
+            def __init__(self, record_path, data):
                 super().__init__()
                 self.record_path = record_path
-                self.segment_dir = segment_dir
-                self.record_name = record_name
                 self.data = data
 
             def run(self):
@@ -216,23 +181,8 @@ class DataCollectionUI(QtWidgets.QMainWindow):
                 with lzma.open(self.record_path, "wb") as f:
                     pickle.dump(self.data, f)
 
-                # Segment and save segments
-                segments = segment_by_checkpoints(self.data)
-                if segments:
-                    for i, segment in enumerate(segments):
-                        segment_path = os.path.join(
-                            self.segment_dir, f"{self.record_name}_segment_{i}.npz"
-                        )
-                        with lzma.open(segment_path, "wb") as f:
-                            pickle.dump(segment, f)
-                    print(f"Saved {len(segments)} segments to {self.segment_dir}")
-                else:
-                    print("No checkpoint passages detected - no segments created")
-
         self.saving_worker = ThreadedSaver(
-            f"{record_dir}/record_{fid}.npz",
-            f"{record_dir}/segments",
-            f"record_{fid}",
+            f"{base_dir}/record_{fid}.npz",
             self.recorded_data,
         )
         self.recorded_data = []
