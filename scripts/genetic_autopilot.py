@@ -52,7 +52,7 @@ class GeneticAutopilot:
         self.total_time = time.time() - self.start_time
         self.is_running = False
 
-        self.inputs_to_finish_segment = self.current_action_index
+        self.frames_used = self.frame_counter
 
         # Stop recording
         if self.car:
@@ -61,7 +61,7 @@ class GeneticAutopilot:
         results = {
             "collision_counter": self.collision_counter,
             "segment_completed": self.segment_completed,
-            "inputs_to_finish_segment": self.inputs_to_finish_segment,
+            "frames_used": self.frames_used,
             "positions": self.positions,
             "recorded_frames": self.car.recorded_frames if self.car else [],
         }
@@ -216,7 +216,7 @@ class GeneticMsgProcessor:
             results = current_autopilot.stop_evaluation()
             self.results.append(results)
             print(
-                f"INDIVIDUAL {self.current_autopilot_index} RESULTS: {results['collision_counter']} {results['segment_completed']} {results['inputs_to_finish_segment']}"
+                f"INDIVIDUAL {self.current_autopilot_index} RESULTS: {results['collision_counter']} {results['segment_completed']} {results['frames_used']}"
             )
             print(json.dumps(results["positions"]))
 
@@ -325,7 +325,7 @@ class GeneticMsgProcessor:
             self.results.append(results)
             # Print results for GA to parse
             print(
-                f"INDIVIDUAL {self.current_autopilot_index} RESULTS: {results['collision_counter']} {results['segment_completed']} {results['inputs_to_finish_segment']}"
+                f"INDIVIDUAL {self.current_autopilot_index} RESULTS: {results['collision_counter']} {results['segment_completed']} {results['frames_used']}"
             )
 
             self.current_autopilot_index += 1

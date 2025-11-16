@@ -391,7 +391,7 @@ class GeneticAlgorithm:
         self,
         collision_counter: int,
         segment_completed: bool,
-        inputs_to_finish_segment: int,
+        frames_used: int,
         distance_to_next: float,
     ) -> float:
         """Calculate fitness score from evaluation results"""
@@ -403,7 +403,7 @@ class GeneticAlgorithm:
 
         collision_penalty = collision_counter * 10.0
 
-        fitness = base_fitness + collision_penalty + (inputs_to_finish_segment * 20)
+        fitness = base_fitness + collision_penalty + (frames_used * 20)
         return fitness
 
     def _evaluate_population_in_game(self, generation: int) -> List[float]:
@@ -462,11 +462,11 @@ class GeneticAlgorithm:
                         idx = int(parts[1])
                         results_str = " ".join(
                             parts[3:]
-                        )  # collision_counter segment_completed inputs_to_finish_segment
+                        )  # collision_counter segment_completed frames_used
                         results_parts = results_str.split()
                         collision_counter = int(results_parts[0])
                         segment_completed = results_parts[1].lower() == "true"
-                        inputs_to_finish_segment = int(results_parts[2])
+                        frames_used = int(results_parts[2])
 
                         # Next line should be positions JSON
                         positions = []
@@ -492,7 +492,7 @@ class GeneticAlgorithm:
                         fitness_score = self.calculate_fitness(
                             collision_counter,
                             segment_completed,
-                            inputs_to_finish_segment,
+                            frames_used,
                             distance,
                         )
                         fitness_dict[idx] = fitness_score
@@ -504,12 +504,12 @@ class GeneticAlgorithm:
                         self.individual_stats[idx] = {
                             "collision_counter": collision_counter,
                             "segment_completed": segment_completed,
-                            "inputs_to_finish_segment": inputs_to_finish_segment,
+                            "frames_used": frames_used,
                             "distance_to_checkpoint": distance,
                             "fitness_score": fitness_score,
                         }
                         print(
-                            f"Individual {idx}: collision_counter={collision_counter}, segment_completed={segment_completed}, inputs_to_finish_segment={inputs_to_finish_segment}, distance={distance:.2f}, fitness={fitness_score:.2f}"
+                            f"Individual {idx}: collision_counter={collision_counter}, segment_completed={segment_completed}, frames_used={frames_used}, distance={distance:.2f}, fitness={fitness_score:.2f}"
                         )
                     except (ValueError, IndexError):
                         pass
@@ -637,13 +637,13 @@ class GeneticAlgorithm:
             for g in summary["generations"]
         ]
 
-        # Handle input efficiency data - only include generations where segment was completed
-        inputs_data = []
+        # Handle frame efficiency data - only include generations where segment was completed
+        frames_data = []
         completed_generations = []
         for g in summary["generations"]:
             if g["best_generation_individual_scores"]["segment_completed"]:
-                inputs_data.append(
-                    g["best_generation_individual_scores"]["inputs_to_finish_segment"]
+                frames_data.append(
+                    g["best_generation_individual_scores"]["frames_used"]
                 )
                 completed_generations.append(g["generation"])
 
@@ -664,6 +664,25 @@ class GeneticAlgorithm:
                 best_ind_idx = int(ind_part)
             except (ValueError, IndexError):
                 pass
+
+        # Initialize overall best variables
+        best_positions = []
+        overall_best_inputs = 0
+        if best_gen_num is not None and best_ind_idx is not None:
+            best_trajectory_file = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/generation_{best_gen_num}/individual_{best_ind_idx}.json"
+            if os.path.exists(best_trajectory_file):
+                with open(best_trajectory_file, "r") as f:
+                    best_trajectory_data = json.load(f)
+                best_positions = [
+                    frame.get("position", [0, 0, 0]) for frame in best_trajectory_data
+                ]
+                best_positions = [
+                    json.loads(pos) if isinstance(pos, str) else pos
+                    for pos in best_positions
+                ]
+                if best_positions and best_positions[0] != self.initial_position:
+                    best_positions.insert(0, self.initial_position)
+                overall_best_inputs = len(best_positions) if best_positions else 0
 
         # Plot trajectories from all generations
         for g in summary["generations"]:
@@ -697,7 +716,7 @@ class GeneticAlgorithm:
                         traj_z,
                         "blue",
                         linewidth=4,
-                        label="Overall Best Individual",
+                        label=f"Overall Best Individual ({overall_best_inputs} frames)",
                         alpha=0.9,
                         zorder=3,
                     )
@@ -716,7 +735,7 @@ class GeneticAlgorithm:
                 orig_z,
                 "orange",
                 linewidth=3,
-                label="Original Trajectory",
+                label=f"Original Trajectory ({len(self.original_positions)} frames)",
                 alpha=0.8,
                 zorder=2,
             )
@@ -768,7 +787,7 @@ class GeneticAlgorithm:
 
         # Create custom legend
         legend_elements = [
-            Line2D([0], [0], color="orange", linewidth=3, label="Original Trajectory"),
+            Line2D([0], [0], color="orange", linewidth=3, label=f"Original Trajectory ({len(self.original_positions) if hasattr(self, 'original_positions') and self.original_positions else 0} frames)"),
             Line2D(
                 [0],
                 [0],
@@ -777,7 +796,7 @@ class GeneticAlgorithm:
                 alpha=0.5,
                 label="Generation Bests",
             ),
-            Line2D([0], [0], color="blue", linewidth=4, label="Overall Best"),
+            Line2D([0], [0], color="blue", linewidth=4, label=f"Overall Best ({overall_best_inputs} frames)"),
         ]
         # Add border legends
         if self.obstacle_vertices:
@@ -892,70 +911,70 @@ class GeneticAlgorithm:
         plt.savefig(plot_file2, dpi=150, bbox_inches="tight")
         plt.close()
 
-        # Plot 3: Input Efficiency Evolution with subplots
+        # Plot 3: Frame Efficiency Evolution with subplots
         fig3, (ax3a, ax3b) = plt.subplots(2, 1, figsize=(10, 8), sharex=True)
-        if inputs_data:
-            # Best inputs
+        if frames_data:
+            # Best frames
             ax3a.plot(
                 completed_generations,
-                inputs_data,
+                frames_data,
                 "g-o",
                 linewidth=3,
                 markersize=8,
-                label="Best Individual Inputs",
+                label="Best Individual Frames",
             )
             ax3a.axhline(
                 y=original_actions_count,
                 color="red",
                 linestyle="--",
                 linewidth=3,
-                label=f"Original Actions ({original_actions_count})",
+                label=f"Original Frames ({original_actions_count})",
             )
-            ax3a.set_ylabel("Best Inputs to Complete", fontsize=12)
+            ax3a.set_ylabel("Best Frames Used", fontsize=12)
             ax3a.set_title(
-                "Best Input Efficiency Evolution\n(Completed Segments Only)",
+                "Best Frame Efficiency Evolution\n(Completed Segments Only)",
                 fontsize=14,
                 fontweight="bold",
             )
             ax3a.grid(True, alpha=0.3)
             ax3a.legend()
 
-            # Mean inputs for completed
-            mean_inputs_data = []
+            # Mean frames for completed
+            mean_frames_data = []
             for g in summary["generations"]:
                 if g["best_generation_individual_scores"]["segment_completed"] and "all_individual_stats" in g:
-                    completed_inputs = [
-                        stat["inputs_to_finish_segment"]
+                    completed_frames = [
+                        stat["frames_used"]
                         for stat in g["all_individual_stats"]
                         if stat["segment_completed"]
                     ]
-                    if completed_inputs:
-                        mean_inputs_data.append(np.mean(completed_inputs))
+                    if completed_frames:
+                        mean_frames_data.append(np.mean(completed_frames))
                     else:
-                        mean_inputs_data.append(g["best_generation_individual_scores"]["inputs_to_finish_segment"])
+                        mean_frames_data.append(g["best_generation_individual_scores"]["frames_used"])
                 elif g["best_generation_individual_scores"]["segment_completed"]:
-                    mean_inputs_data.append(g["best_generation_individual_scores"]["inputs_to_finish_segment"])
+                    mean_frames_data.append(g["best_generation_individual_scores"]["frames_used"])
 
-            if mean_inputs_data:
+            if mean_frames_data:
                 ax3b.plot(
                     completed_generations,
-                    mean_inputs_data,
+                    mean_frames_data,
                     "m-^",
                     linewidth=3,
                     markersize=8,
-                    label="Mean Inputs (Completed)",
+                    label="Mean Frames (Completed)",
                 )
                 ax3b.axhline(
                     y=original_actions_count,
                     color="red",
                     linestyle="--",
                     linewidth=3,
-                    label=f"Original Actions ({original_actions_count})",
+                    label=f"Original Frames ({original_actions_count})",
                 )
                 ax3b.set_xlabel("Generation", fontsize=12)
-                ax3b.set_ylabel("Mean Inputs to Complete", fontsize=12)
+                ax3b.set_ylabel("Mean Frames Used", fontsize=12)
                 ax3b.set_title(
-                    "Mean Input Efficiency Evolution\n(Completed Segments Only)",
+                    "Mean Frame Efficiency Evolution\n(Completed Segments Only)",
                     fontsize=14,
                     fontweight="bold",
                 )
@@ -992,13 +1011,13 @@ class GeneticAlgorithm:
                     color="gray",
                 )
                 ax.set_title(
-                    "Input Efficiency Evolution\n(Completed Segments Only)",
+                    "Frame Efficiency Evolution\n(Completed Segments Only)",
                     fontsize=14,
                     fontweight="bold",
                 )
 
         fig3.suptitle(
-            f"Input Efficiency - {summary['track_name']} Segment {self.segment} ({total_generations} Generations)",
+            f"Frame Efficiency - {summary['track_name']} Segment {self.segment} ({total_generations} Generations)",
             fontsize=16,
             fontweight="bold",
             y=0.98,
@@ -1054,21 +1073,23 @@ class GeneticAlgorithm:
                 z_best,
                 color="blue",
                 linewidth=3,
-                label="Best Individual",
+                label=f"Best Individual ({len(best_positions)} frames)",
                 alpha=0.9,
             )
 
         # Plot original trajectory
-        x_orig = [-p[0] for p in self.original_positions]  # Flip horizontally
-        z_orig = [-p[2] for p in self.original_positions]  # Flip vertically
-        ax1.plot(
-            x_orig,
-            z_orig,
-            color="orange",
-            linewidth=3,
-            label="Original Trajectory",
-            alpha=0.9,
-        )
+        if hasattr(self, "original_positions") and self.original_positions:
+            orig_x = [-p[0] for p in self.original_positions]  # Flip horizontally
+            orig_z = [-p[2] for p in self.original_positions]  # Flip vertically
+            ax1.plot(
+                orig_x,
+                orig_z,
+                "orange",
+                linewidth=3,
+                label=f"Original Trajectory ({len(self.original_positions)} frames)",
+                alpha=0.8,
+                zorder=2,
+            )
 
         ax1.set_xlabel("X Position", fontsize=11)
         ax1.set_ylabel("Z Position", fontsize=11)
@@ -1182,13 +1203,13 @@ class GeneticAlgorithm:
             i for i, completed in enumerate(self.completion_status) if completed
         ]
         completed_ids = [f"Ind {i}" for i in completed_indices]
-        completed_inputs = [
-            self.individual_stats[i]["inputs_to_finish_segment"]
+        completed_frames = [
+            self.individual_stats[i]["frames_used"]
             for i in completed_indices
         ]
 
-        if completed_inputs:  # Only plot if there are completed individuals
-            bars = ax3.bar(completed_ids, completed_inputs, color="skyblue", alpha=0.7)
+        if completed_frames:  # Only plot if there are completed individuals
+            bars = ax3.bar(completed_ids, completed_frames, color="skyblue", alpha=0.7)
 
             # Add horizontal line for initial actions
             ax3.axhline(
@@ -1207,11 +1228,11 @@ class GeneticAlgorithm:
             ax3.legend(fontsize=9)
 
             # Add value labels on bars
-            for bar, inputs in zip(bars, completed_inputs):
+            for bar, frames in zip(bars, completed_frames):
                 ax3.text(
                     bar.get_x() + bar.get_width() / 2,
-                    bar.get_height() + max(completed_inputs) * 0.02,
-                    str(inputs),
+                    bar.get_height() + max(completed_frames) * 0.02,
+                    str(frames),
                     ha="center",
                     va="bottom",
                     fontsize=8,
