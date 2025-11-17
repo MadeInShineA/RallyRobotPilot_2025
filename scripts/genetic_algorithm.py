@@ -362,8 +362,6 @@ class GeneticAlgorithm:
                     f"generation_{generation + 1}_individual_{best_idx}"
                 )
 
-            print(".2f")
-
             # Create multiple analysis graphs
             if (
                 hasattr(self, "original_positions")
@@ -449,46 +447,41 @@ class GeneticAlgorithm:
                 cmd.append(self.replay_file)
 
             # Run the subprocess
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, cwd=os.getcwd()
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd=os.getcwd(),
             )
 
-            if result.returncode != 0:
-                print(f"Error running game evaluation: {result.stderr}")
-                # Return high fitness scores as penalty
-                return [1000.0] * len(self.population)
-
-            # Parse results from stdout
-            # The genetic_autopilot_runner should output results
-            lines = result.stdout.strip().split("\n")
             fitness_dict = {}
             self.individual_positions = [[] for _ in range(len(self.population))]
             self.completion_status = [False] * len(self.population)
             self.individual_stats = [{}] * len(self.population)
 
-            i = 0
-            while i < len(lines):
-                line = lines[i]
-                if line.startswith("INDIVIDUAL") and "RESULTS:" in line:
-                    parts = line.split()
-                    try:
+            lines = []
+            line_iter = iter(proc.stdout)
+            try:
+                for line in line_iter:
+                    lines.append(line.strip())
+                    if line.startswith("INDIVIDUAL") and "RESULTS:" in line:
+                        parts = line.split()
                         idx = int(parts[1])
-                        results_str = " ".join(
-                            parts[3:]
-                        )  # collision_counter segment_completed frames_used
+                        results_str = " ".join(parts[3:])
                         results_parts = results_str.split()
                         collision_counter = int(results_parts[0])
                         segment_completed = results_parts[1].lower() == "true"
                         frames_used = int(results_parts[2])
 
                         # Next line should be positions JSON
+                        next_line = next(line_iter)
+                        lines.append(next_line.strip())
                         positions = []
-                        if i + 1 < len(lines):
-                            try:
-                                positions = json.loads(lines[i + 1])
-                                i += 1  # Skip the positions line
-                            except json.JSONDecodeError:
-                                pass
+                        try:
+                            positions = json.loads(next_line.strip())
+                        except json.JSONDecodeError:
+                            pass
 
                         # Compute distance to next checkpoint
                         distance = 1000.0
@@ -524,9 +517,18 @@ class GeneticAlgorithm:
                         print(
                             f"Individual {idx}: collision_counter={collision_counter}, segment_completed={segment_completed}, frames_used={frames_used}, distance={distance:.2f}, fitness={fitness_score:.2f}"
                         )
-                    except (ValueError, IndexError):
-                        pass
-                i += 1
+            except StopIteration:
+                pass
+
+            proc.stdout.close()
+            stderr_output = proc.stderr.read()
+            proc.stderr.close()
+            proc.wait()
+
+            if proc.returncode != 0:
+                print(f"Error running game evaluation: {stderr_output}")
+                # Return high fitness scores as penalty
+                return [1000.0] * len(self.population)
 
             # Build fitness_scores list, defaulting to high penalty
             fitness_scores = [
