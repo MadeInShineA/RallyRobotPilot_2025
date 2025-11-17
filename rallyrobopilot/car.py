@@ -11,6 +11,8 @@ from .sensing_message import SensingSnapshot
 from math import pow, atan2
 import json
 import os
+from ursina import application
+import glob
 
 sign = lambda x: -1 if x < 0 else (1 if x > 0 else 0)
 Text.default_resolution = 1080 * Text.size
@@ -212,6 +214,7 @@ class Car(Entity):
         self.genetic_generation = 0
         self.genetic_individual = 0
         self.genetic_segment = 0
+        self.base_record = None
 
         # Checkpoint mode
         self.checkpoint_mode = False
@@ -711,9 +714,17 @@ class Car(Entity):
         """
         self.recording = True
         trackname = self.track.track_name if self.track else "unknown"
-        path = f"genetic_data/records/{trackname}/"
-        # Never clear genetic_data/records to preserve data for GA initialization
-        os.makedirs(path, exist_ok=True)
+        if not self.is_genetic_car:
+            fid = 0
+            while os.path.exists(f"visual_records/record_{fid}"):
+                fid += 1
+            self.record_dir = f"visual_records/record_{fid}"
+            os.makedirs(f"{self.record_dir}/images", exist_ok=True)
+            os.makedirs(f"{self.record_dir}/records", exist_ok=True)
+        else:
+            path = f"genetic_data/records/{trackname}/"
+            # Never clear genetic_data/records to preserve data for GA initialization
+            os.makedirs(path, exist_ok=True)
         self.recorded_frames = []
         self.frame_idx = 0
         self.recording_start_time = real_time.time()
@@ -729,7 +740,7 @@ class Car(Entity):
         if self.is_genetic_car:
             print(f"Genetic attributes: gen={self.genetic_generation}, ind={self.genetic_individual}, seg={self.genetic_segment}")
             # Save to genetic path
-            dir_path = f"genetic_data/populations/{self.track.track_name if self.track else 'unknown'}/segment_{self.genetic_segment}/generation_{self.genetic_generation}"
+            dir_path = f"genetic_data/populations/{self.track.track_name if self.track else 'unknown'}/{self.base_record}/segment_{self.genetic_segment}/generation_{self.genetic_generation}"
             os.makedirs(dir_path, exist_ok=True)
             file_path = f"{dir_path}/individual_{self.genetic_individual}.json"
             with open(file_path, "w") as f:
@@ -739,16 +750,13 @@ class Car(Entity):
             )
         else:
             # Save recorded data
-            trackname = self.track.track_name if self.track else "unknown"
-            path = f"genetic_data/records/{trackname}/"
-            complete_path = f"{path}complete_record.json"
+            complete_path = f"{self.record_dir}/records/complete_record.json"
             with open(complete_path, "w") as f:
                 json.dump(self.recorded_frames, f)
             print(f"Complete record saved to {complete_path}")
 
             # Split into segments (only from first lap)
-            segments_path = f"{path}segments/"
-            os.makedirs(segments_path, exist_ok=True)
+            segments_path = f"{self.record_dir}/records/"
             from collections import defaultdict
 
             checkpoint_to_frames = defaultdict(list)
@@ -759,10 +767,19 @@ class Car(Entity):
             segments = sorted(checkpoint_to_frames.keys())
             for i, cp in enumerate(segments):
                 segment_data = checkpoint_to_frames[cp]
-                segment_file = f"{segments_path}segment_{i}.json"
+                segment_dir = f"{segments_path}segment_{i}"
+                os.makedirs(segment_dir, exist_ok=True)
+                segment_file = f"{segment_dir}/record.json"
                 with open(segment_file, "w") as f:
                     json.dump(segment_data, f)
                 print(f"Segment {i} (checkpoint {cp}) saved to {segment_file}")
+
+            # Rename images
+            image_files = glob.glob(f"{self.record_dir}/images/*.png*")
+            for f in image_files:
+                if ".png-" in f:
+                    base = f.split(".png-")[0] + ".png"
+                    os.rename(f, base)
 
     def save_frame(self):
         """
@@ -802,6 +819,8 @@ class Car(Entity):
             }
         )
         self.frame_idx += 1
+        if not self.is_genetic_car:
+            application.base.screenshot(f"{self.record_dir}/images/frame_{self.frame_idx - 1}.png")
 
     def animate_text(self, text, top=1.2, bottom=0.6):
         """

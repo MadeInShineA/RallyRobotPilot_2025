@@ -36,10 +36,10 @@ def load_replay_positions(replay_file):
 def main():
     if len(sys.argv) < 3:
         print(
-            "Usage: python genetic_autopilot_runner.py <action_sequences.json> <track_name> [--batch] [--start_segment <x>] [replay_file]"
+            "Usage: python genetic_autopilot_runner.py <action_sequences.json> <track_name> [--batch] [--start_segment <x>] [--base_record <record>] [replay_file]"
         )
         print(
-            "Example: python genetic_autopilot_runner.py genetic_data/SimpleTrack_population.json SimpleTrack --batch --start_segment 4 records/record_0.npz"
+            "Example: python genetic_autopilot_runner.py genetic_data/SimpleTrack_population.json SimpleTrack --batch --start_segment 4 --base_record 0 records/record_0.npz"
         )
         sys.exit(1)
 
@@ -53,6 +53,7 @@ def main():
     initial_position = None
     start_segment = None
     generation = 0
+    base_record = None
 
     args = sys.argv[3:]
 
@@ -72,6 +73,9 @@ def main():
             i += 2
         elif args[i] == "--generation":
             generation = int(args[i + 1])
+            i += 2
+        elif args[i] == "--base_record":
+            base_record = args[i + 1]
             i += 2
         else:
             if replay_file is None:
@@ -101,6 +105,7 @@ def main():
             initial_angle=initial_angle,
             initial_speed=initial_speed,
             track_name=track_name,
+            base_record=base_record,
         )
         print(f"Loaded {len(genetic_processor.autopilots)} genetic autopilots")
     except Exception as e:

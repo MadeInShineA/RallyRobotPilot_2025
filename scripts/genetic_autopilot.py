@@ -43,9 +43,7 @@ class GeneticAutopilot:
         self.segment_completed = False
         self.positions = []
 
-        # Start recording
-        if self.car:
-            self.car.start_record()
+        # Recording is started in _reset_car_for_individual
 
     def stop_evaluation(self):
         """Stop the evaluation and return results"""
@@ -138,6 +136,7 @@ class GeneticMsgProcessor:
         initial_angle: Optional[float] = None,
         initial_speed: Optional[float] = None,
         track_name: str = "",
+        base_record: Optional[str] = None,
     ):
         self.current_autopilot_index = 0
         self.results = []
@@ -148,6 +147,7 @@ class GeneticMsgProcessor:
         self.initial_angle = initial_angle
         self.initial_speed = initial_speed
         self.track_name = track_name
+        self.base_record = base_record
         self.car = None
         if action_sequences_path:
             self.autopilots = self.load_genetic_autopilots(action_sequences_path)
@@ -237,9 +237,12 @@ class GeneticMsgProcessor:
         self.car.genetic_generation = self.generation
         self.car.genetic_individual = idx
         self.car.genetic_segment = self.segment
+        self.car.base_record = self.base_record
         print(
-            f"Set genetic car attributes: gen={self.generation}, ind={idx}, seg={self.segment}"
+            f"Set genetic car attributes: gen={self.generation}, ind={idx}, seg={self.segment}, base_record={self.base_record}"
         )
+        # Start recording for genetic car
+        self.car.start_record()
         if self.initial_position:
             self.car.position = ursina.Vec3(*self.initial_position)
         if self.initial_angle is not None:

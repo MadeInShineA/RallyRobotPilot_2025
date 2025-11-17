@@ -28,6 +28,7 @@ class GeneticAlgorithm:
         mutation_rate: float = 0.3,
         crossover_rate: float = 0.8,
         replay_file: Optional[str] = None,
+        base_record: Optional[str] = None,
     ):
         self.track_name = track_name
         self.population_size = population_size
@@ -36,6 +37,7 @@ class GeneticAlgorithm:
         self.mutation_rate = mutation_rate
         self.crossover_rate = crossover_rate
         self.replay_file = replay_file
+        self.base_record = base_record
 
         # Load checkpoints
         self.checkpoints = []
@@ -194,7 +196,12 @@ class GeneticAlgorithm:
     def _initialize_population(self) -> List[List[Tuple[int, int, int, int]]]:
         """Create initial population by mutating base actions from segment"""
         # Load segment data
-        segment_file = f"genetic_data/records/{self.track_name}/segments/segment_{self.segment}.json"
+        if not self.base_record:
+            print(
+                "Error: base_record must be specified to load segment data from visual_records"
+            )
+            exit(1)
+        segment_file = f"visual_records/{self.base_record}/records/segment_{self.segment}/record.json"
         print(
             f"DEBUG _initialize_population: segment_file {segment_file} exists: {os.path.exists(segment_file)}"
         )
@@ -308,9 +315,7 @@ class GeneticAlgorithm:
         print("This GA will automatically launch the game to evaluate fitness!")
 
         # Clear previous results for this segment
-        segment_dir = (
-            f"genetic_data/populations/{self.track_name}/segment_{self.segment}"
-        )
+        segment_dir = f"genetic_data/populations/{self.track_name}/{self.base_record}/segment_{self.segment}"
         if os.path.exists(segment_dir):
             shutil.rmtree(segment_dir)
             print(f"Cleared previous results in {segment_dir}")
@@ -366,7 +371,7 @@ class GeneticAlgorithm:
                 sns.set_palette("husl")
                 sns.set_context("notebook", font_scale=1.0)
 
-                graph_dir = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/generation_{generation + 1}"
+                graph_dir = f"genetic_data/populations/{self.track_name}/{self.base_record}/segment_{self.segment}/generation_{generation + 1}"
                 os.makedirs(graph_dir, exist_ok=True)
 
                 # Create combined figure with subplots
@@ -431,6 +436,8 @@ class GeneticAlgorithm:
                 str(self.initial_speed),
                 "--initial_position",
                 json.dumps(self.initial_position),
+                "--base_record",
+                str(self.base_record),
             ]
             if self.replay_file:
                 cmd.append(self.replay_file)
@@ -532,10 +539,10 @@ class GeneticAlgorithm:
     def _save_generation_result(self, generation_num, best_idx, best_stats):
         """Save a specific generation's results to the summary file"""
         os.makedirs(
-            f"genetic_data/populations/{self.track_name}/segment_{self.segment}",
+            f"genetic_data/populations/{self.track_name}/{self.base_record}/segment_{self.segment}",
             exist_ok=True,
         )
-        summary_file = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/summary.json"
+        summary_file = f"genetic_data/populations/{self.track_name}/{self.base_record}/segment_{self.segment}/summary.json"
 
         # Load existing summary or create new one
         if os.path.exists(summary_file):
@@ -584,7 +591,7 @@ class GeneticAlgorithm:
 
     def _update_overall_best(self, overall_best_str):
         """Update the overall best individual in the summary file"""
-        summary_file = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/summary.json"
+        summary_file = f"genetic_data/populations/{self.track_name}/{self.base_record}/segment_{self.segment}/summary.json"
 
         if os.path.exists(summary_file):
             with open(summary_file, "r") as f:
@@ -599,7 +606,14 @@ class GeneticAlgorithm:
 
     def _load_original_data(self):
         """Load original segment data for plotting"""
-        segment_file = f"genetic_data/records/{self.track_name}/segments/segment_{self.segment}.json"
+        if not self.base_record:
+            print(
+                "Error: base_record must be specified to load segment data from visual_records"
+            )
+            self.original_positions = []
+            self.original_angles = []
+            return
+        segment_file = f"visual_records/{self.base_record}/records/segment_{self.segment}/record.json"
         if os.path.exists(segment_file):
             with open(segment_file) as f:
                 data = json.load(f)
@@ -613,7 +627,7 @@ class GeneticAlgorithm:
         """Generate three separated summary plots for all generations"""
         # Ensure original data is loaded
 
-        summary_file = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/summary.json"
+        summary_file = f"genetic_data/populations/{self.track_name}/{self.base_record}/segment_{self.segment}/summary.json"
 
         if not os.path.exists(summary_file):
             print("No summary file found, cannot generate summary plot")
@@ -669,7 +683,7 @@ class GeneticAlgorithm:
         best_positions = []
         overall_best_inputs = 0
         if best_gen_num is not None and best_ind_idx is not None:
-            best_trajectory_file = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/generation_{best_gen_num}/individual_{best_ind_idx}.json"
+            best_trajectory_file = f"genetic_data/populations/{self.track_name}/{self.base_record}/segment_{self.segment}/generation_{best_gen_num}/individual_{best_ind_idx}.json"
             if os.path.exists(best_trajectory_file):
                 with open(best_trajectory_file, "r") as f:
                     best_trajectory_data = json.load(f)
@@ -689,7 +703,7 @@ class GeneticAlgorithm:
             gen_num = g["generation"]
             ind_idx = g["best_generation_individual_idx"]
 
-            trajectory_file = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/generation_{gen_num}/individual_{ind_idx}.json"
+            trajectory_file = f"genetic_data/populations/{self.track_name}/{self.base_record}/segment_{self.segment}/generation_{gen_num}/individual_{ind_idx}.json"
 
             if os.path.exists(trajectory_file):
                 with open(trajectory_file, "r") as f:
@@ -787,7 +801,13 @@ class GeneticAlgorithm:
 
         # Create custom legend
         legend_elements = [
-            Line2D([0], [0], color="orange", linewidth=3, label=f"Original Trajectory ({len(self.original_positions) if hasattr(self, 'original_positions') and self.original_positions else 0} frames)"),
+            Line2D(
+                [0],
+                [0],
+                color="orange",
+                linewidth=3,
+                label=f"Original Trajectory ({len(self.original_positions) if hasattr(self, 'original_positions') and self.original_positions else 0} frames)",
+            ),
             Line2D(
                 [0],
                 [0],
@@ -796,7 +816,13 @@ class GeneticAlgorithm:
                 alpha=0.5,
                 label="Generation Bests",
             ),
-            Line2D([0], [0], color="blue", linewidth=4, label=f"Overall Best ({overall_best_inputs} frames)"),
+            Line2D(
+                [0],
+                [0],
+                color="blue",
+                linewidth=4,
+                label=f"Overall Best ({overall_best_inputs} frames)",
+            ),
         ]
         # Add border legends
         if self.obstacle_vertices:
@@ -820,7 +846,7 @@ class GeneticAlgorithm:
         for g in summary["generations"]:
             gen_num = g["generation"]
             ind_idx = g["best_generation_individual_idx"]
-            trajectory_file = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/generation_{gen_num}/individual_{ind_idx}.json"
+            trajectory_file = f"genetic_data/populations/{self.track_name}/{self.base_record}/segment_{self.segment}/generation_{gen_num}/individual_{ind_idx}.json"
             if os.path.exists(trajectory_file):
                 with open(trajectory_file, "r") as f:
                     trajectory_data = json.load(f)
@@ -857,7 +883,7 @@ class GeneticAlgorithm:
         )
 
         # Save the plot
-        plot_file1 = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/summary_trajectory.png"
+        plot_file1 = f"genetic_data/populations/{self.track_name}/{self.base_record}/segment_{self.segment}/summary_trajectory.png"
         plt.savefig(plot_file1, dpi=150, bbox_inches="tight")
         plt.close()
 
@@ -883,7 +909,9 @@ class GeneticAlgorithm:
             if "all_fitness_scores" in g:
                 mean_fitness_scores.append(np.mean(g["all_fitness_scores"]))
             else:
-                mean_fitness_scores.append(g["best_generation_individual_scores"]["fitness_score"])  # fallback
+                mean_fitness_scores.append(
+                    g["best_generation_individual_scores"]["fitness_score"]
+                )  # fallback
 
         ax2b.plot(
             generations,
@@ -907,7 +935,7 @@ class GeneticAlgorithm:
             y=0.98,
         )
 
-        plot_file2 = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/summary_fitness.png"
+        plot_file2 = f"genetic_data/populations/{self.track_name}/{self.base_record}/segment_{self.segment}/summary_fitness.png"
         plt.savefig(plot_file2, dpi=150, bbox_inches="tight")
         plt.close()
 
@@ -942,7 +970,10 @@ class GeneticAlgorithm:
             # Mean frames for completed
             mean_frames_data = []
             for g in summary["generations"]:
-                if g["best_generation_individual_scores"]["segment_completed"] and "all_individual_stats" in g:
+                if (
+                    g["best_generation_individual_scores"]["segment_completed"]
+                    and "all_individual_stats" in g
+                ):
                     completed_frames = [
                         stat["frames_used"]
                         for stat in g["all_individual_stats"]
@@ -951,9 +982,13 @@ class GeneticAlgorithm:
                     if completed_frames:
                         mean_frames_data.append(np.mean(completed_frames))
                     else:
-                        mean_frames_data.append(g["best_generation_individual_scores"]["frames_used"])
+                        mean_frames_data.append(
+                            g["best_generation_individual_scores"]["frames_used"]
+                        )
                 elif g["best_generation_individual_scores"]["segment_completed"]:
-                    mean_frames_data.append(g["best_generation_individual_scores"]["frames_used"])
+                    mean_frames_data.append(
+                        g["best_generation_individual_scores"]["frames_used"]
+                    )
 
             if mean_frames_data:
                 ax3b.plot(
@@ -1023,7 +1058,7 @@ class GeneticAlgorithm:
             y=0.98,
         )
 
-        plot_file3 = f"genetic_data/populations/{self.track_name}/segment_{self.segment}/summary_efficiency.png"
+        plot_file3 = f"genetic_data/populations/{self.track_name}/{self.base_record}/segment_{self.segment}/summary_efficiency.png"
         plt.savefig(plot_file3, dpi=150, bbox_inches="tight")
         plt.close()
 
@@ -1204,8 +1239,7 @@ class GeneticAlgorithm:
         ]
         completed_ids = [f"Ind {i}" for i in completed_indices]
         completed_frames = [
-            self.individual_stats[i]["frames_used"]
-            for i in completed_indices
+            self.individual_stats[i]["frames_used"] for i in completed_indices
         ]
 
         if completed_frames:  # Only plot if there are completed individuals
@@ -1329,9 +1363,9 @@ class GeneticAlgorithm:
 def main():
     import sys
 
-    if len(sys.argv) < 5:
+    if len(sys.argv) < 6:
         print(
-            "Usage: python genetic_algorithm.py <track_name> <population_size> <generations> <segment>"
+            "Usage: python genetic_algorithm.py <track_name> <population_size> <generations> <segment> <base_record>"
         )
         sys.exit(1)
 
@@ -1339,6 +1373,7 @@ def main():
     population_size = int(sys.argv[2])
     generations = int(sys.argv[3])
     segment = int(sys.argv[4])
+    base_record = sys.argv[5]
     mutation_rate = 0.1
     crossover_rate = 0.2
 
@@ -1349,6 +1384,7 @@ def main():
         segment=segment,
         mutation_rate=mutation_rate,
         crossover_rate=crossover_rate,
+        base_record=base_record,
     )
     ga.run_evolution()
 
