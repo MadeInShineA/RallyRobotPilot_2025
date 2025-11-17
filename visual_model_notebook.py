@@ -18,6 +18,20 @@ def _():
     import seaborn as sns
     import matplotlib.pyplot as plt
     from sklearn.model_selection import train_test_split
+    import torch
+    import torch.nn as nn
+    import torch.optim as optim
+    from torch.utils.data import DataLoader, TensorDataset
+    from sklearn.model_selection import KFold
+    from sklearn.metrics import (
+        confusion_matrix,
+        f1_score,
+        accuracy_score,
+        classification_report,
+    )
+    import joblib
+    import mlflow
+    import mlflow.pytorch
     return Image, lzma, mo, np, os, pickle, pl, plt, sns, train_test_split
 
 
@@ -65,7 +79,6 @@ def _(lzma, os, pickle, pl):
         print(f"✅ Successfully created combined Polars DataFrame with {len(df)} rows")
     except Exception as e:
         print(f"❌ Error creating combined DataFrame: {e}")
-
     return (df,)
 
 
@@ -276,25 +289,25 @@ def _(np, pl, plt):
             )
             .sort("record")
         )
-    
+
         # Prepare data for heatmap — 4 columns
         control_cols = ["forward_usage", "back_usage", "left_usage", "right_usage"]
         usage_matrix = usage_df.select(control_cols).to_numpy()
         records_sorted = usage_df["record"].to_list()
-    
+
         # Plot heatmap
         _fig, _ax = plt.subplots(figsize=(10, max(4, 0.5 * len(records_sorted))))
         _im = _ax.imshow(usage_matrix, cmap="Blues", aspect="auto")
-    
+
         # Set ticks
         _ax.set_yticks(np.arange(len(records_sorted)))
         _ax.set_yticklabels(records_sorted)
         _ax.set_xticks(np.arange(len(control_cols)))
         _ax.set_xticklabels(["Forward", "Back", "Left", "Right"], rotation=45, ha="right")
-    
+
         # Add colorbar
         plt.colorbar(_im, ax=_ax, label="Fraction of time active")
-    
+
         # Add text annotations
         for _i in range(len(records_sorted)):
             for _j in range(len(control_cols)):
@@ -307,7 +320,7 @@ def _(np, pl, plt):
                     va="center",
                     color="black" if _val < 0.5 else "white",
                 )
-    
+
         _ax.set_title("Control Usage per Record")
         plt.tight_layout()
         plt.show()
@@ -328,24 +341,24 @@ def _(np, pl, plt):
             col for col in df.columns if col.startswith("raycast_")
         ]
         min_rays_df = df.with_columns(min_ray=pl.min_horizontal(ray_cols))
-    
+
         # 2. Extract data
         x = min_rays_df["min_ray"].to_numpy()
         y = min_rays_df["car_speed"].to_numpy()
-    
+
         # 3. Remove invalid values
         valid = np.isfinite(x) & np.isfinite(y)
         x, y = x[valid], y[valid]
-    
+
         # 4. Bin the data
         n_bins = 30
         bins = np.linspace(x.min(), x.max(), n_bins + 1)
         bin_centers = (bins[:-1] + bins[1:]) / 2
-    
+
         medians = []
         q25 = []
         q75 = []
-    
+
         for _i in range(n_bins):
             mask = (x >= bins[_i]) & (x < bins[_i + 1])
             if np.any(mask):
@@ -360,18 +373,18 @@ def _(np, pl, plt):
 
         # 5. Plot
         plt.figure(figsize=(8, 5))
-    
+
         # Optional: light scatter for context (reduce opacity further)
         plt.scatter(x, y, alpha=0.15, s=8, color="gray", edgecolors="none", label="Frames")
-    
+
         # Median line
         plt.plot(bin_centers, medians, color="red", linewidth=2.5, label="Median speed")
-    
+
         # IQR band (25th–75th percentile)
         plt.fill_between(
             bin_centers, q25, q75, color="red", alpha=0.2, label="25th–75th percentile"
         )
-    
+
         # Labels & styling
         plt.xlabel("Minimum Raycast Distance", fontsize=12)
         plt.ylabel("Car Speed", fontsize=12)
@@ -456,16 +469,7 @@ def _(df_augmented, np, pl):
             return_dtype=pl.Object
         ).alias("2d_array_image_preprocessed")
     )
-
-    df_augmented_array_image_transposed = df_augmented_array_image.with_columns(
-        pl.col("pil_image_preprocessed").map_elements(
-            lambda pil_img: np.array(pil_img).T if pil_img is not None else None, # Perform transpose here
-            return_dtype=pl.Object
-        ).alias("2d_array_image_preprocessed_transposed")
-    )
-
-    df_augmented_array_image_transposed.head()
-    return (df_augmented_array_image_transposed,)
+    return (df_augmented_array_image,)
 
 
 @app.cell
@@ -475,13 +479,13 @@ def _(mo):
 
 
 @app.cell
-def _(df_augmented_array_image_transposed, train_test_split):
+def _(df_augmented_array_image, train_test_split):
     df_train, df_test = train_test_split(
-        df_augmented_array_image_transposed, test_size=0.2, random_state=42
+        df_augmented_array_image, test_size=0.2, random_state=42
     )
 
     # --- 2. Prepare feature and label columns
-    feature_cols = "2d_array_image_preprocessed_transposed"
+    feature_cols = "2d_array_image_preprocessed"
 
     # --- 3. Create X (inputs) as Polars DataFrames
     X_train = df_train.select(feature_cols)
@@ -500,6 +504,12 @@ def _(X_train):
 
 
 @app.cell
+def _(X_train):
+    X_train["2d_array_image_preprocessed"][0].shape
+    return
+
+
+@app.cell
 def _(y_train):
     y_train.head()
     return
@@ -507,89 +517,22 @@ def _(y_train):
 
 @app.cell
 def _():
-    # --- Architecture Definitions for CNN with explicit layer types ---
-    # Each architecture is a list of tuples: (layer_type, parameters)
-    # Layer types: "conv", "maxpool", "linear", "dropout"
-    # For conv: (layer_type, {"out_channels": int, "kernel_size": int, "stride": int, "padding": int})
-    # For maxpool: (layer_type, {"kernel_size": int, "stride": int})
-    # For linear: (layer_type, {"out_features": int})
-    # For dropout: (layer_type, {"p": float})
-
     architectures = [
         # Architecture 1: Simple CNN
         (
             "simple_cnn",
             [
-                ("conv", {"out_channels": 32, "kernel_size": 3, "stride": 1, "padding": 1}),
+                ("conv", {"out_channels": 8, "kernel_size": 3, "stride": 1, "padding": 1}),
                 ("maxpool", {"kernel_size": 2, "stride": 2}),
                 ("dropout", {"p": 0.25}),
-                ("conv", {"out_channels": 64, "kernel_size": 3, "stride": 1, "padding": 1}),
+                ("conv", {"out_channels": 8, "kernel_size": 3, "stride": 1, "padding": 1}),
                 ("maxpool", {"kernel_size": 2, "stride": 2}),
                 ("dropout", {"p": 0.25}),
-                ("linear", {"out_features": 128}),
+                ("linear", {"out_features": 16}),
                 ("dropout", {"p": 0.25}),
-                ("linear", {"out_features": 64}),
+                ("linear", {"out_features": 8}),
             ],
             "ReLU"
-        ),
-    
-        # Architecture 2: Deeper CNN
-        (
-            "deep_cnn",
-            [
-                ("conv", {"out_channels": 32, "kernel_size": 3, "stride": 1, "padding": 1}),
-                ("conv", {"out_channels": 32, "kernel_size": 3, "stride": 1, "padding": 1}),
-                ("maxpool", {"kernel_size": 2, "stride": 2}),
-                ("dropout", {"p": 0.25}),
-                ("conv", {"out_channels": 64, "kernel_size": 3, "stride": 1, "padding": 1}),
-                ("conv", {"out_channels": 64, "kernel_size": 3, "stride": 1, "padding": 1}),
-                ("maxpool", {"kernel_size": 2, "stride": 2}),
-                ("dropout", {"p": 0.25}),
-                ("conv", {"out_channels": 128, "kernel_size": 3, "stride": 1, "padding": 1}),
-                ("maxpool", {"kernel_size": 2, "stride": 2}),
-                ("dropout", {"p": 0.25}),
-                ("linear", {"out_features": 256}),
-                ("dropout", {"p": 0.25}),
-                ("linear", {"out_features": 128}),
-                ("dropout", {"p": 0.25}),
-            ],
-            "ReLU"
-        ),
-    
-        # Architecture 3: CNN with more fully connected layers
-        (
-            "wide_cnn",
-            [
-                ("conv", {"out_channels": 16, "kernel_size": 5, "stride": 1, "padding": 2}),
-                ("maxpool", {"kernel_size": 2, "stride": 2}),
-                ("dropout", {"p": 0.25}),
-                ("conv", {"out_channels": 32, "kernel_size": 3, "stride": 1, "padding": 1}),
-                ("maxpool", {"kernel_size": 2, "stride": 2}),
-                ("dropout", {"p": 0.25}),
-                ("linear", {"out_features": 256}),
-                ("dropout", {"p": 0.3}),
-                ("linear", {"out_features": 128}),
-                ("dropout", {"p": 0.3}),
-                ("linear", {"out_features": 64}),
-                ("dropout", {"p": 0.3}),
-            ],
-            "ReLU"
-        ),
-    
-        # Architecture 4: Mixed activation types
-        (
-            "mixed_activation_cnn",
-            [
-                ("conv", {"out_channels": 32, "kernel_size": 3, "stride": 1, "padding": 1}),
-                ("maxpool", {"kernel_size": 2, "stride": 2}),
-                ("dropout", {"p": 0.25}),
-                ("conv", {"out_channels": 64, "kernel_size": 3, "stride": 1, "padding": 1}),
-                ("maxpool", {"kernel_size": 2, "stride": 2}),
-                ("dropout", {"p": 0.25}),
-                ("linear", {"out_features": 128}),
-                ("dropout", {"p": 0.25}),
-            ],
-            "Tanh"
         ),
     ]
     return
