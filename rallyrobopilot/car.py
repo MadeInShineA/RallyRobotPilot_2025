@@ -721,10 +721,6 @@ class Car(Entity):
             self.record_dir = f"visual_records/record_{fid}"
             os.makedirs(f"{self.record_dir}/images", exist_ok=True)
             os.makedirs(f"{self.record_dir}/records", exist_ok=True)
-        else:
-            path = f"genetic_data/records/{trackname}/"
-            # Never clear genetic_data/records to preserve data for GA initialization
-            os.makedirs(path, exist_ok=True)
         self.recorded_frames = []
         self.frame_idx = 0
         self.recording_start_time = real_time.time()
