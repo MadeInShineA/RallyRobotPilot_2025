@@ -3,3 +3,5 @@ __pycache__/
 records_csv/
 model/
 genetic_data/
+visual_records/
+records/

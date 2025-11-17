@@ -2,13 +2,9 @@ import sys
 import os
 import json
 import ursina
-from rallyrobopilot import prepare_game_app, RemoteController, NetworkDataCmdInterface
-from flask import Flask
-from rallyrobopilot.sensing_message import SensingSnapshot
+from rallyrobopilot import prepare_game_app
 import time
 from ursina import held_keys
-import pickle
-import lzma
 
 """
 Replay Autopilot Runner
@@ -70,6 +66,10 @@ class ReplayProcessor:
         if self.car:
             self.car.start_record()
 
+    def stop_evaluation(self):
+        if self.car:
+            self.car.stop_record()
+
     @property
     def is_running(self):
         return self.autopilot.is_running
@@ -109,23 +109,7 @@ def segment_by_checkpoints(snapshots):
     return segments
 
 
-def save_record(recorded_data, fid):
-    """Save recorded images and inputs"""
-    if len(recorded_data) == 0:
-        print("[X] No data to save!")
-        return
 
-    replay_dir = f"./records/replay_{fid}"
-    os.makedirs(replay_dir, exist_ok=True)
-
-    # Save inputs to input.json
-    inputs = [
-        {"frame": i, "input": data["input"]} for i, data in enumerate(recorded_data)
-    ]
-    with open(f"{replay_dir}/input.json", "w") as f:
-        json.dump(inputs, f)
-
-    print(f"[+] Recorded replay saved to {replay_dir}")
 
 
 def main():
@@ -172,14 +156,6 @@ def main():
 
     print(f"Loaded {len(action_sequence)} actions from {frames_file}")
 
-    # Find next available replay number
-    os.makedirs("./records", exist_ok=True)
-    fid = 0
-    while os.path.exists(f"./records/replay_{fid}"):
-        fid += 1
-
-    print(f"Will save to ./records/replay_{fid}")
-
     # Determine track metadata path
     if "/" in track_name:
         track_metadata = track_name
@@ -208,15 +184,11 @@ def main():
 
     replay_processor.start_evaluation()
 
-    # Disable checkpoints visuals
+    # Show checkpoints and rays for visualization
     if car.checkpoint_handler:
-        car.checkpoint_handler.hide_ui()
+        car.checkpoint_handler.show_ui()
     if car.multiray_sensor:
-        car.multiray_sensor.set_enabled_rays(False)
-
-    # Recording
-    recorded_data = []
-    frame_idx = 0
+        car.multiray_sensor.set_enabled_rays(True)
 
     # Run the game
     try:
@@ -230,46 +202,14 @@ def main():
             if sleep_time > 0:
                 time.sleep(sleep_time)
 
-            # Record if replaying
-            if replay_processor.is_running:
-                # Capture screenshot
-                replay_dir = f"./records/replay_{fid}"
-                os.makedirs(replay_dir, exist_ok=True)
-                from ursina import application
-
-                application.base.screenshot(f"{replay_dir}/frame_{frame_idx}.png")
-                # Collect input and speed
-                recorded_data.append(
-                    {
-                        "frame": frame_idx,
-                        "input": [
-                            int(held_keys["w"]),
-                            int(held_keys["s"]),
-                            int(held_keys["a"]),
-                            int(held_keys["d"]),
-                        ],
-                        "speed": car.speed,
-                    }
-                )
-                frame_idx += 1
-
             # Check if autopilot finished
             if car.autopilot and not car.autopilot.is_running:
                 break
     except KeyboardInterrupt:
         print("\nInterrupted by user")
 
-    # Rename images to remove timestamp
-    import glob
-
-    image_files = glob.glob(f"./records/replay_{fid}/*.jpg")
-    for f in image_files:
-        if ".png-" in f:
-            base = f.split(".png-")[0] + ".png"
-            os.rename(f, base)
-
-    # Save the recorded data
-    save_record(recorded_data, fid)
+    # Stop recording
+    replay_processor.stop_evaluation()
 
 
 if __name__ == "__main__":

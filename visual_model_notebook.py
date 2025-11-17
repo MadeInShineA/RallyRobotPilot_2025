@@ -32,7 +32,8 @@ def _():
     import joblib
     import mlflow
     import mlflow.pytorch
-    return Image, lzma, mo, np, os, pickle, pl, plt, sns, train_test_split
+    import json
+    return Image, json, mo, np, os, pl, plt, sns, train_test_split
 
 
 @app.cell
@@ -42,40 +43,77 @@ def _(mo):
 
 
 @app.cell
-def _(lzma, os, pickle, pl):
+def _(Image, json, os, pl):
+
     record_dir = "./visual_records/"
 
     all_records = []  # Accumulate all records here
 
-    for filename in os.listdir(record_dir):
-        if not filename.endswith(".npz"):
+    for record_subdir in os.listdir(record_dir):
+        record_subdir_path = os.path.join(record_dir, record_subdir)
+        if not os.path.isdir(record_subdir_path):
             continue
-
-        input_path = os.path.join(record_dir, filename)
+    
+        # Load the complete record JSON from the records subdirectory
+        records_dir = os.path.join(record_subdir_path, "records")
+        json_path = os.path.join(records_dir, "complete_record.json")
+    
+        if not os.path.exists(json_path):
+            print(f"❌ Missing complete_record.json in {record_subdir}/records/")
+            continue
+    
         try:
-            with lzma.open(input_path, "rb") as _f:
-                snapshots = pickle.load(_f)
+            with open(json_path, "r") as f:
+                snapshots = json.load(f)
         except Exception as e:
-            print(f"❌ Failed to load {filename}: {e}")
+            print(f"❌ Failed to load {json_path}: {e}")
             continue
 
-        for _idx, s in enumerate(snapshots):
+        # Get list of image files in the images subdirectory (at the same level as records)
+        images_dir = os.path.join(record_subdir_path, "images")
+        if not os.path.exists(images_dir):
+            print(f"❌ Missing images directory in {record_subdir}")
+            continue
+    
+        for s in snapshots:
+            frame_idx = s["idx"]
+        
+            # Construct the expected image filename based on frame index
+            image_filename = f"frame_{frame_idx}.png"
+            image_path = os.path.join(images_dir, image_filename)
+        
+            # Verify the image file exists
+            if not os.path.exists(image_path):
+                print(f"❌ Missing image file: {image_path}")
+                continue
+        
+            # Load the actual PIL Image
+            try:
+                pil_image = Image.open(image_path)
+            except Exception as e:
+                print(f"❌ Failed to load image {image_path}: {e}")
+                continue
+        
             record = {
-                "record": filename,
-                "frame_idx": _idx,
-                "forward": s.current_controls[0],
-                "back": s.current_controls[1],
-                "left": s.current_controls[2],
-                "right": s.current_controls[3],
-                "car_speed": s.car_speed,
-                "image": s.image,
-                **{f"raycast_{i}": float(d) for i, d in enumerate(s.raycast_distances)},
+                "record": record_subdir,
+                "frame_idx": frame_idx,
+                "forward": s["input"][0],
+                "back": s["input"][1],
+                "left": s["input"][2],
+                "right": s["input"][3],
+                "car_speed": s["speed"],
+                "image": pil_image,  # Store actual PIL Image object
+                "time": s["time"],
+                "angle": s["angle"],
+                "position": s["position"],
+                "checkpoint": s["checkpoint"],
+                "lap": s["lap"],
             }
             all_records.append(record)
 
     # Create a single Polars DataFrame from all records
     try:
-        df = pl.DataFrame(all_records).sort("record")
+        df = pl.DataFrame(all_records).sort(["record", "frame_idx"])
         print(f"✅ Successfully created combined Polars DataFrame with {len(df)} rows")
     except Exception as e:
         print(f"❌ Error creating combined DataFrame: {e}")
@@ -167,34 +205,6 @@ def _(df_last_frames_cleaned, pl):
 
 @app.cell
 def _(mo):
-    mo.md(r"""### Convert the images to PIL""")
-    return
-
-
-@app.cell
-def _(Image, np):
-    def load_image_as_PIL(array_image: list[list[list[int]]])-> Image:
-        arr = np.array(array_image, dtype=np.uint8)
-        return Image.fromarray(arr)
-    return (load_image_as_PIL,)
-
-
-@app.cell
-def _(df_cleaned, load_image_as_PIL, pl):
-    df_cleaned_pil = df_cleaned.with_columns(
-        pl.col('image').map_elements(load_image_as_PIL, return_dtype=pl.Object).alias('pil_image')
-    )
-    return (df_cleaned_pil,)
-
-
-@app.cell
-def _(df_cleaned_pil):
-    df_cleaned_pil.head()
-    return
-
-
-@app.cell
-def _(mo):
     mo.md(r"""### Preprocess the PIL images""")
     return
 
@@ -209,14 +219,14 @@ def _(Image):
 
 
 @app.cell
-def _(df_cleaned_pil, pl, preprocess_image):
+def _(df_cleaned, pl, preprocess_image):
     images_dimensions = (90, 160)
 
-    df_cleaned_pil_preprocessed = df_cleaned_pil.with_columns(
-        pl.col('pil_image').map_elements(
+    df_cleaned_pil_preprocessed = df_cleaned.with_columns(
+        pl.col('image').map_elements(
             lambda img: preprocess_image(img, size=images_dimensions), 
             return_dtype=pl.Object
-        ).alias('pil_image_preprocessed')
+        ).alias('image_preprocessed')
     )
     return (df_cleaned_pil_preprocessed,)
 
@@ -229,13 +239,13 @@ def _(df_cleaned_pil_preprocessed):
 
 @app.cell
 def _(df_cleaned_pil_preprocessed):
-    df_cleaned_pil_preprocessed["pil_image"][0]
+    df_cleaned_pil_preprocessed["image"][0]
     return
 
 
 @app.cell
 def _(df_cleaned_pil_preprocessed):
-    df_cleaned_pil_preprocessed["pil_image_preprocessed"][0]
+    df_cleaned_pil_preprocessed["image_preprocessed"][0]
     return
 
 
@@ -334,75 +344,6 @@ def _(df_cleaned_pil_preprocessed, plot_usage):
 
 
 @app.cell
-def _(np, pl, plt):
-    def plot_car_speed_proximity(df: pl.DataFrame)-> None:
-        # 1. Compute min_ray
-        ray_cols = [
-            col for col in df.columns if col.startswith("raycast_")
-        ]
-        min_rays_df = df.with_columns(min_ray=pl.min_horizontal(ray_cols))
-
-        # 2. Extract data
-        x = min_rays_df["min_ray"].to_numpy()
-        y = min_rays_df["car_speed"].to_numpy()
-
-        # 3. Remove invalid values
-        valid = np.isfinite(x) & np.isfinite(y)
-        x, y = x[valid], y[valid]
-
-        # 4. Bin the data
-        n_bins = 30
-        bins = np.linspace(x.min(), x.max(), n_bins + 1)
-        bin_centers = (bins[:-1] + bins[1:]) / 2
-
-        medians = []
-        q25 = []
-        q75 = []
-
-        for _i in range(n_bins):
-            mask = (x >= bins[_i]) & (x < bins[_i + 1])
-            if np.any(mask):
-                speeds = y[mask]
-                medians.append(np.median(speeds))
-                q25.append(np.percentile(speeds, 25))
-                q75.append(np.percentile(speeds, 75))
-            else:
-                medians.append(np.nan)
-                q25.append(np.nan)
-                q75.append(np.nan)
-
-        # 5. Plot
-        plt.figure(figsize=(8, 5))
-
-        # Optional: light scatter for context (reduce opacity further)
-        plt.scatter(x, y, alpha=0.15, s=8, color="gray", edgecolors="none", label="Frames")
-
-        # Median line
-        plt.plot(bin_centers, medians, color="red", linewidth=2.5, label="Median speed")
-
-        # IQR band (25th–75th percentile)
-        plt.fill_between(
-            bin_centers, q25, q75, color="red", alpha=0.2, label="25th–75th percentile"
-        )
-
-        # Labels & styling
-        plt.xlabel("Minimum Raycast Distance", fontsize=12)
-        plt.ylabel("Car Speed", fontsize=12)
-        plt.title("Car Speed vs. Proximity to Obstacles", fontsize=13, pad=15)
-        plt.grid(True, linestyle="--", alpha=0.5)
-        plt.legend()
-        plt.tight_layout()
-        plt.show()
-    return (plot_car_speed_proximity,)
-
-
-@app.cell
-def _(df_cleaned_pil_preprocessed, plot_car_speed_proximity):
-    plot_car_speed_proximity(df_cleaned_pil_preprocessed)
-    return
-
-
-@app.cell
 def _(mo):
     mo.md(r"""### Data augmentation""")
     return
@@ -422,12 +363,12 @@ def _(Image, df_cleaned_pil_preprocessed, pl):
     # Apply augmentations
     augmented_rows = []
     for row in df_cleaned_pil_preprocessed.iter_rows(named=True):
-        original_img = row["pil_image_preprocessed"]
+        original_img = row["image_preprocessed"]
         augmented_rows.append(row)  # Keep original
 
         for aug_img, control_swaps in augment_image(original_img):
             new_row = row.copy()
-            new_row["pil_image_preprocessed"] = aug_img
+            new_row["image_preprocessed"] = aug_img
             for old, new in control_swaps.items():
                 new_row[new] = row[old]
                 new_row[old] = row[new]
@@ -464,12 +405,18 @@ def _(mo):
 @app.cell
 def _(df_augmented, np, pl):
     df_augmented_array_image = df_augmented.with_columns(
-        pl.col("pil_image_preprocessed").map_elements(
+        pl.col("image_preprocessed").map_elements(
             lambda pil_img: np.array(pil_img) if pil_img is not None else None,
             return_dtype=pl.Object
         ).alias("2d_array_image_preprocessed")
     )
     return (df_augmented_array_image,)
+
+
+@app.cell
+def _(df_augmented_array_image):
+    df_augmented_array_image
+    return
 
 
 @app.cell
