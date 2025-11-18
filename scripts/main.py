@@ -71,7 +71,7 @@ if not track_path.exists():
 # Setup Flask
 flask_app = Flask(__name__)
 flask_thread = Thread(target=flask_app.run, kwargs={"host": "0.0.0.0", "port": 5001})
-print("Flask server running on port 5000")
+print("Flask server running on port 5001")
 flask_thread.start()
 
 app, car = prepare_game_app(

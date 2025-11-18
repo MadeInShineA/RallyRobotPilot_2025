@@ -4,6 +4,7 @@ import mlflow.pytorch
 import torch
 import numpy as np
 from PIL import Image  # Using Pillow as per your preference/memory
+import argparse
 
 """
 This file implements an autopilot using a model trained and saved via MLflow.
@@ -155,6 +156,10 @@ if __name__ == "__main__":
 
     sys.excepthook = except_hook
 
+    parser = argparse.ArgumentParser(description="Visual Autopilot with MLflow model")
+    parser.add_argument("run_id", help="MLflow run ID for the model")
+    args = parser.parse_args()
+
     # --- IMPORTANT: Set the correct MLflow model URI here ---
     # This should point to the 'model' artifact logged by your marimo notebook.
     # Example: If the notebook ran locally and used default mlruns, it might be:
@@ -162,7 +167,7 @@ if __name__ == "__main__":
     # Or if you saved it locally after training:
     # mlflow_model_uri = "./path/to/your/saved/mlflow/model"
     # You need to find the run ID and artifact path from your MLflow tracking server/UI.
-    mlflow_model_uri = "runs:/e241058efcaa40dc9fb1798b2e9449c9/model"  # Replace with your actual run ID
+    mlflow_model_uri = f"runs:/{args.run_id}/model"
 
     try:
         nn_brain = MLflowModelNNMsgProcessor(model_uri=mlflow_model_uri)
