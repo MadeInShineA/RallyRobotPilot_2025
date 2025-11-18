@@ -18,20 +18,7 @@ def _():
     import seaborn as sns
     import matplotlib.pyplot as plt
     from sklearn.model_selection import train_test_split
-    import torch
-    import torch.nn as nn
-    import torch.optim as optim
-    from torch.utils.data import DataLoader, TensorDataset
-    from sklearn.model_selection import KFold
-    from sklearn.metrics import (
-        confusion_matrix,
-        f1_score,
-        accuracy_score,
-        classification_report,
-    )
     import joblib
-    import mlflow
-    import mlflow.pytorch
     import json
     return Image, json, mo, np, os, pl, plt, sns, train_test_split
 
@@ -53,15 +40,15 @@ def _(Image, json, os, pl):
         record_subdir_path = os.path.join(record_dir, record_subdir)
         if not os.path.isdir(record_subdir_path):
             continue
-    
+
         # Load the complete record JSON from the records subdirectory
         records_dir = os.path.join(record_subdir_path, "records")
         json_path = os.path.join(records_dir, "complete_record.json")
-    
+
         if not os.path.exists(json_path):
             print(f"❌ Missing complete_record.json in {record_subdir}/records/")
             continue
-    
+
         try:
             with open(json_path, "r") as f:
                 snapshots = json.load(f)
@@ -74,26 +61,26 @@ def _(Image, json, os, pl):
         if not os.path.exists(images_dir):
             print(f"❌ Missing images directory in {record_subdir}")
             continue
-    
+
         for s in snapshots:
             frame_idx = s["idx"]
-        
+
             # Construct the expected image filename based on frame index
             image_filename = f"frame_{frame_idx}.png"
             image_path = os.path.join(images_dir, image_filename)
-        
+
             # Verify the image file exists
             if not os.path.exists(image_path):
                 print(f"❌ Missing image file: {image_path}")
                 continue
-        
+
             # Load the actual PIL Image
             try:
                 pil_image = Image.open(image_path)
             except Exception as e:
                 print(f"❌ Failed to load image {image_path}: {e}")
                 continue
-        
+
             record = {
                 "record": record_subdir,
                 "frame_idx": frame_idx,
@@ -286,9 +273,18 @@ def _(df_cleaned_pil_preprocessed, plot_controls):
 
 @app.cell
 def _(np, pl, plt):
-    def plot_usage(df: pl.DataFrame)-> None:
+    def plot_usage(df) -> None:
+        # Ensure we have a 'nothing' column: 1 when all controls are 0
+        df = df.with_columns(
+            nothing=(1 - (
+                pl.col("forward").cast(pl.Boolean) |
+                pl.col("back").cast(pl.Boolean) |
+                pl.col("left").cast(pl.Boolean) |
+                pl.col("right").cast(pl.Boolean)
+            ).cast(pl.Int8))
+        )
 
-        # Compute usage per file for each control
+        # Compute average usage per record for all 5 controls
         usage_df = (
             df.group_by("record")
             .agg(
@@ -296,24 +292,25 @@ def _(np, pl, plt):
                 pl.col("back").mean().alias("back_usage"),
                 pl.col("left").mean().alias("left_usage"),
                 pl.col("right").mean().alias("right_usage"),
+                pl.col("nothing").mean().alias("nothing_usage"),
             )
             .sort("record")
         )
 
-        # Prepare data for heatmap — 4 columns
-        control_cols = ["forward_usage", "back_usage", "left_usage", "right_usage"]
+        # Prepare data for heatmap
+        control_cols = ["forward_usage", "back_usage", "left_usage", "right_usage", "nothing_usage"]
         usage_matrix = usage_df.select(control_cols).to_numpy()
         records_sorted = usage_df["record"].to_list()
 
         # Plot heatmap
-        _fig, _ax = plt.subplots(figsize=(10, max(4, 0.5 * len(records_sorted))))
+        _fig, _ax = plt.subplots(figsize=(12, max(4, 0.5 * len(records_sorted))))
         _im = _ax.imshow(usage_matrix, cmap="Blues", aspect="auto")
 
         # Set ticks
         _ax.set_yticks(np.arange(len(records_sorted)))
         _ax.set_yticklabels(records_sorted)
         _ax.set_xticks(np.arange(len(control_cols)))
-        _ax.set_xticklabels(["Forward", "Back", "Left", "Right"], rotation=45, ha="right")
+        _ax.set_xticklabels(["Forward", "Back", "Left", "Right", "Nothing"], rotation=45, ha="right")
 
         # Add colorbar
         plt.colorbar(_im, ax=_ax, label="Fraction of time active")
@@ -398,7 +395,7 @@ def _(df_augmented, plot_usage):
 
 @app.cell
 def _(mo):
-    mo.md(r"""Add a""")
+    mo.md(r"""### Convert images to 2d array""")
     return
 
 
@@ -415,7 +412,7 @@ def _(df_augmented, np, pl):
 
 @app.cell
 def _(df_augmented_array_image):
-    df_augmented_array_image
+    df_augmented_array_image.head()
     return
 
 
@@ -441,7 +438,7 @@ def _(df_augmented_array_image, train_test_split):
     y_train = df_train.select("forward", "back", "left", "right")
 
     y_test = df_test.select("forward", "back", "left", "right")
-    return X_train, y_train
+    return X_test, X_train, y_test, y_train
 
 
 @app.cell
@@ -477,16 +474,913 @@ def _():
                 ("dropout", {"p": 0.25}),
                 ("linear", {"out_features": 16}),
                 ("dropout", {"p": 0.25}),
-                ("linear", {"out_features": 8}),
+                ("linear", {"out_features": 4}),
             ],
             "ReLU"
         ),
     ]
+    return (architectures,)
+
+
+@app.cell
+def _(f1_score, np, os, plt, sns):
+    import torch
+    import torch.nn as nn
+    import mlflow
+    import mlflow.pytorch
+    from sklearn.metrics import classification_report, confusion_matrix, roc_curve, auc
+    import tempfile
+
+    class FlexibleCNN(nn.Module):
+        def __init__(self, arch_config, input_channels=1, input_height=160, input_width=90):
+            super(FlexibleCNN, self).__init__()
+        
+            name, layers, activation_name = arch_config
+            self.arch_name = name
+            self.layers_config = layers
+            self.activation_name = activation_name
+            self.input_channels = input_channels
+        
+            # Identify where features end (before first linear layer)
+            feature_configs = []
+            classifier_configs = []
+        
+            # Find the first linear layer to separate features from classifier
+            first_linear_idx = len(layers)
+            for i, (layer_type, _) in enumerate(layers):
+                if layer_type == "linear":
+                    first_linear_idx = i
+                    break
+        
+            feature_configs = layers[:first_linear_idx]
+            classifier_configs = layers[first_linear_idx:]
+        
+            # Calculate the flattened size after features
+            self.features = self._build_sequential_with_channels(feature_configs, activation_name)
+            self.feature_output_size = self._get_feature_output_size(input_height, input_width)
+        
+            if classifier_configs:
+                # Update all linear layers' in_features appropriately
+                updated_classifier_configs = []
+                prev_out_features = self.feature_output_size  # For the first linear layer
+            
+                for layer_type, params in classifier_configs:
+                    if layer_type == "linear":
+                        updated_params = params.copy()
+                        updated_params['in_features'] = prev_out_features
+                        updated_classifier_configs.append((layer_type, updated_params))
+                        # Update prev_out_features for the next linear layer
+                        prev_out_features = params['out_features']
+                    else:
+                        updated_classifier_configs.append((layer_type, params))
+            
+                self.classifier = self._build_sequential(updated_classifier_configs, activation_name)
+            else:
+                self.classifier = nn.Identity()
+
+        def _get_feature_output_size(self, input_height, input_width):
+            """Calculate the flattened output size of features"""
+            with torch.no_grad():
+                dummy_input = torch.zeros(1, self.input_channels, input_height, input_width)
+                output = self.features(dummy_input)
+                flattened_size = output.view(1, -1).size(1)
+            return flattened_size
+
+        def _build_sequential_with_channels(self, layer_configs, activation_name):
+            modules = []
+            in_channels = self.input_channels  # Now configurable (1 for grayscale, 3 for RGB)
+        
+            for layer_type, params in layer_configs:
+                if layer_type == "conv":
+                    # Set in_channels for the current layer
+                    conv_params = params.copy()
+                    conv_params['in_channels'] = in_channels
+                    modules.append(nn.Conv2d(**conv_params))
+                
+                    # Update in_channels for the next layer
+                    if 'out_channels' in params:
+                        in_channels = params['out_channels']
+                
+                    # Add batch norm
+                    if 'out_channels' in params:
+                        modules.append(nn.BatchNorm2d(params['out_channels']))
+                elif layer_type == "maxpool":
+                    modules.append(nn.MaxPool2d(**params))
+                elif layer_type == "dropout":
+                    modules.append(nn.Dropout(**params))
+            
+                # Add activation after conv layers
+                if layer_type == "conv" and activation_name == "ReLU":
+                    modules.append(nn.ReLU(inplace=True))
+        
+            return nn.Sequential(*modules)
+
+        def _build_sequential(self, layer_configs, activation_name):
+            modules = []
+            for layer_type, params in layer_configs:
+                if layer_type == "linear":
+                    # Make sure in_features is present
+                    if 'in_features' not in params:
+                        raise ValueError(f"Linear layer missing required 'in_features': {params}")
+                    modules.append(nn.Linear(**params))
+                elif layer_type == "dropout":
+                    modules.append(nn.Dropout(**params))
+            
+                # Add activation after linear layers
+                if layer_type == "linear" and activation_name == "ReLU":
+                    modules.append(nn.ReLU(inplace=True))
+        
+            return nn.Sequential(*modules)
+
+        def forward(self, x):
+            x = self.features(x)
+            x = torch.flatten(x, 1)
+            x = self.classifier(x)
+            return x
+
+    def create_training_plots(train_losses, val_losses, train_accs, val_accs, train_f1s, val_f1s, epoch):
+        """Create comprehensive training plots including F1 scores"""
+        fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+    
+        # Training and validation loss
+        axes[0, 0].plot(range(1, epoch + 2), train_losses, 'b-', label='Training Loss')
+        axes[0, 0].plot(range(1, epoch + 2), val_losses, 'r-', label='Validation Loss')
+        axes[0, 0].set_title('Model Loss')
+        axes[0, 0].set_xlabel('Epoch')
+        axes[0, 0].set_ylabel('Loss')
+        axes[0, 0].legend()
+        axes[0, 0].grid(True)
+    
+        # Training and validation accuracy
+        axes[0, 1].plot(range(1, epoch + 2), train_accs, 'b-', label='Training Accuracy')
+        axes[0, 1].plot(range(1, epoch + 2), val_accs, 'r-', label='Validation Accuracy')
+        axes[0, 1].set_title('Model Accuracy')
+        axes[0, 1].set_xlabel('Epoch')
+        axes[0, 1].set_ylabel('Accuracy (%)')
+        axes[0, 1].legend()
+        axes[0, 1].grid(True)
+    
+        # Training and validation F1 score
+        axes[0, 2].plot(range(1, epoch + 2), train_f1s, 'b-', label='Training F1-Score')
+        axes[0, 2].plot(range(1, epoch + 2), val_f1s, 'r-', label='Validation F1-Score')
+        axes[0, 2].set_title('Weighted F1-Score')
+        axes[0, 2].set_xlabel('Epoch')
+        axes[0, 2].set_ylabel('F1-Score')
+        axes[0, 2].legend()
+        axes[0, 2].grid(True)
+    
+        # Loss difference
+        loss_diff = np.array(train_losses) - np.array(val_losses)
+        axes[1, 0].plot(range(1, epoch + 2), loss_diff, 'g-', label='Train - Val Loss')
+        axes[1, 0].axhline(y=0, color='k', linestyle='--')
+        axes[1, 0].set_title('Loss Difference (Overfitting Indicator)')
+        axes[1, 0].set_xlabel('Epoch')
+        axes[1, 0].set_ylabel('Loss Difference')
+        axes[1, 0].legend()
+        axes[1, 0].grid(True)
+    
+        # Accuracy difference
+        acc_diff = np.array(val_accs) - np.array(train_accs)
+        axes[1, 1].plot(range(1, epoch + 2), acc_diff, 'm-', label='Val - Train Accuracy')
+        axes[1, 1].axhline(y=0, color='k', linestyle='--')
+        axes[1, 1].set_title('Accuracy Difference')
+        axes[1, 1].set_xlabel('Epoch')
+        axes[1, 1].set_ylabel('Accuracy Difference (%)')
+        axes[1, 1].legend()
+        axes[1, 1].grid(True)
+    
+        # F1 score difference
+        f1_diff = np.array(val_f1s) - np.array(train_f1s)
+        axes[1, 2].plot(range(1, epoch + 2), f1_diff, 'c-', label='Val - Train F1')
+        axes[1, 2].axhline(y=0, color='k', linestyle='--')
+        axes[1, 2].set_title('F1-Score Difference')
+        axes[1, 2].set_xlabel('Epoch')
+        axes[1, 2].set_ylabel('F1-Score Difference')
+        axes[1, 2].legend()
+        axes[1, 2].grid(True)
+    
+        plt.tight_layout()
+        return fig
+
+    def create_f1_per_class_plot(train_f1_per_class, val_f1_per_class, epoch, class_names):
+        """Create plots showing F1 scores per class"""
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+        axes = axes.ravel()
+    
+        for i, class_name in enumerate(class_names):
+            epochs_range = range(1, epoch + 2)
+            axes[i].plot(epochs_range, train_f1_per_class[i], 'b-', label=f'Training F1')
+            axes[i].plot(epochs_range, val_f1_per_class[i], 'r-', label=f'Validation F1')
+            axes[i].set_title(f'F1-Score - {class_name}')
+            axes[i].set_xlabel('Epoch')
+            axes[i].set_ylabel('F1-Score')
+            axes[i].set_ylim(0, 1)
+            axes[i].legend()
+            axes[i].grid(True)
+        
+            # Add final values as text
+            if len(val_f1_per_class[i]) > 0:
+                final_val_f1 = val_f1_per_class[i][-1]
+                axes[i].text(0.02, 0.98, f'Final Val F1: {final_val_f1:.3f}', 
+                            transform=axes[i].transAxes, verticalalignment='top',
+                            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    
+        plt.tight_layout()
+        return fig
+
+    def plot_confusion_matrices(y_true, y_pred, class_names):
+        """Create confusion matrices for each class (multi-label)"""
+        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+        axes = axes.ravel()
+    
+        for i, class_name in enumerate(class_names):
+            # Binary confusion matrix for each class
+            cm = confusion_matrix(y_true[:, i], y_pred[:, i])
+            sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+                       xticklabels=['Negative', 'Positive'],
+                       yticklabels=['Negative', 'Positive'],
+                       ax=axes[i])
+            axes[i].set_title(f'Confusion Matrix - {class_name}')
+            axes[i].set_xlabel('Predicted')
+            axes[i].set_ylabel('Actual')
+    
+        plt.tight_layout()
+        return fig
+
+    def plot_roc_curves(y_true, y_scores, class_names):
+        """Create ROC curves for each class"""
+        fig, ax = plt.subplots(figsize=(10, 8))
+    
+        for i, class_name in enumerate(class_names):
+            fpr, tpr, _ = roc_curve(y_true[:, i], y_scores[:, i])
+            roc_auc = auc(fpr, tpr)
+            ax.plot(fpr, tpr, label=f'{class_name} (AUC = {roc_auc:.2f})')
+    
+        ax.plot([0, 1], [0, 1], 'k--', label='Random')
+        ax.set_xlabel('False Positive Rate')
+        ax.set_ylabel('True Positive Rate')
+        ax.set_title('ROC Curves - Multi-label Classification')
+        ax.legend()
+        ax.grid(True)
+    
+        return fig
+
+    def plot_prediction_examples(model, test_loader, class_names, num_examples=4):
+        """Visualize prediction examples with bar plots under images"""
+        import matplotlib.gridspec as gridspec
+    
+        model.eval()
+        images, true_labels, pred_labels, pred_scores = [], [], [], []
+    
+        with torch.no_grad():
+            for data, target in test_loader:
+                outputs = model(data)
+                predictions = (outputs > 0).float()
+                scores = torch.sigmoid(outputs)  # Convert logits to probabilities
+            
+                # Store examples
+                images.extend(data.cpu().numpy()[:2])
+                true_labels.extend(target.cpu().numpy()[:2])
+                pred_labels.extend(predictions.cpu().numpy()[:2])
+                pred_scores.extend(scores.cpu().numpy()[:2])
+            
+                if len(images) >= num_examples:
+                    break
+    
+        # Create figure with custom grid for image + bar plot layout
+        fig = plt.figure(figsize=(12, 10))
+        gs = gridspec.GridSpec(num_examples, 1, height_ratios=[3]*num_examples, hspace=0.4)
+    
+        for i in range(min(num_examples, len(images))):
+            img = images[i][0]  # Grayscale channel
+            true_label = true_labels[i]
+            pred_label = pred_labels[i]
+            pred_score = pred_scores[i]
+        
+            # Create sub-grid for each example (image + bar plot)
+            sub_gs = gridspec.GridSpecFromSubplotSpec(2, 1, gs[i], height_ratios=[2, 1], hspace=0.3)
+        
+            # Image subplot
+            ax_img = fig.add_subplot(sub_gs[0])
+            ax_img.imshow(img, cmap='gray')
+        
+            # Create title with true and predicted labels
+            true_actions = [class_names[j] for j, val in enumerate(true_label) if val > 0]
+            pred_actions = [class_names[j] for j, val in enumerate(pred_label) if val > 0]
+        
+            if not true_actions:
+                true_actions = ["none"]
+            if not pred_actions:
+                pred_actions = ["none"]
+            
+            title = f'True: {", ".join(true_actions)} | Pred: {", ".join(pred_actions)}'
+            ax_img.set_title(title, fontsize=10)
+            ax_img.axis('off')
+        
+            # Bar plot subplot
+            ax_bar = fig.add_subplot(sub_gs[1])
+            bars = ax_bar.bar(class_names, pred_score, color=['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728'], alpha=0.7)
+            ax_bar.set_ylim(0, 1)
+            ax_bar.set_ylabel('Prob', fontsize=8)
+            ax_bar.tick_params(axis='x', labelsize=8)
+            ax_bar.tick_params(axis='y', labelsize=8)
+        
+            # Add value labels on bars
+            for j, (bar, score) in enumerate(zip(bars, pred_score)):
+                ax_bar.text(bar.get_x() + bar.get_width()/2., bar.get_height() + 0.02,
+                           f'{score:.2f}', ha='center', va='bottom', fontsize=7)
+        
+            # Add grid for better readability
+            ax_bar.grid(axis='y', alpha=0.3, linestyle='--')
+    
+        plt.tight_layout()
+        return fig
+
+    def train_model(model, train_loader, val_loader, epochs=10, learning_rate=0.001, experiment_name="cnn_experiment"):
+        """
+        Enhanced training with comprehensive MLflow logging and graphics including weighted F1-score
+        """
+        # Set up MLflow
+        mlflow.set_experiment(experiment_name)
+    
+        with mlflow.start_run():
+            # Log comprehensive parameters
+            mlflow.log_param("learning_rate", learning_rate)
+            mlflow.log_param("epochs", epochs)
+            mlflow.log_param("model_architecture", model.arch_name)
+            mlflow.log_param("input_channels", model.input_channels)
+            mlflow.log_param("feature_output_size", model.feature_output_size)
+            mlflow.log_param("batch_size", train_loader.batch_size)
+            mlflow.log_param("optimizer", "Adam")
+            mlflow.log_param("loss_function", "BCEWithLogitsLoss")
+            mlflow.log_param("activation_function", model.activation_name)
+        
+            # Model parameters
+            total_params = sum(p.numel() for p in model.parameters())
+            trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+            mlflow.log_param("total_parameters", total_params)
+            mlflow.log_param("trainable_parameters", trainable_params)
+        
+            optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
+            criterion = nn.BCEWithLogitsLoss()
+        
+            # Track metrics for plotting - ADD F1 scores
+            train_losses, val_losses = [], []
+            train_accs, val_accs = [], []
+            train_f1s, val_f1s = [], []  # New: track overall F1 scores
+            train_f1_per_class = [[] for _ in range(4)]  # Track F1 per class for training
+            val_f1_per_class = [[] for _ in range(4)]    # Track F1 per class for validation
+            train_acc_per_class = [[] for _ in range(4)] # Track accuracy per class for training
+            val_acc_per_class = [[] for _ in range(4)]   # Track accuracy per class for validation
+        
+            class_names = ["forward", "back", "left", "right"]
+        
+            for epoch in range(epochs):
+                # Training phase
+                model.train()
+                train_loss = 0.0
+                train_correct = 0
+                train_total = 0
+                train_pred_list, train_target_list = [], []
+            
+                for batch_idx, (data, target) in enumerate(train_loader):
+                    optimizer.zero_grad()
+                    output = model(data)
+                    loss = criterion(output, target)
+                    loss.backward()
+                    optimizer.step()
+                
+                    train_loss += loss.item()
+                
+                    # Use sigmoid probabilities with 0.5 threshold (like original)
+                    probabilities = torch.sigmoid(output)
+                    predicted = (probabilities > 0.5).float()
+                
+                    train_total += target.numel()
+                    train_correct += (predicted == target).sum().item()
+                
+                    # Store predictions and targets for F1 calculation
+                    train_pred_list.append(predicted.cpu().numpy())
+                    train_target_list.append(target.cpu().numpy())
+            
+                # Calculate training metrics
+                train_pred_all = np.vstack(train_pred_list)
+                train_target_all = np.vstack(train_target_list)
+            
+                # Overall weighted F1
+                try:
+                    train_f1_weighted = f1_score(train_target_all, train_pred_all, average='weighted', zero_division=0)
+                except:
+                    train_f1_weighted = 0.0
+                train_f1s.append(train_f1_weighted)
+            
+                # Per-class F1 scores
+                try:
+                    train_f1_class = f1_score(train_target_all, train_pred_all, average=None, zero_division=0)
+                    for i in range(4):
+                        train_f1_per_class[i].append(train_f1_class[i])
+                except:
+                    # If there are no positive samples for a class, set F1 to 0
+                    for i in range(4):
+                        train_f1_per_class[i].append(0.0)
+            
+                # Per-class accuracy
+                for i in range(4):
+                    class_pred = train_pred_all[:, i]
+                    class_target = train_target_all[:, i]
+                    class_acc = np.mean(class_pred == class_target) * 100
+                    train_acc_per_class[i].append(class_acc)
+            
+                train_acc = 100. * train_correct / train_total
+                avg_train_loss = train_loss / len(train_loader)
+                train_losses.append(avg_train_loss)
+                train_accs.append(train_acc)
+            
+                # Validation phase
+                model.eval()
+                val_loss = 0.0
+                val_correct = 0
+                val_total = 0
+                val_predictions, val_targets, val_scores = [], [], []
+            
+                with torch.no_grad():
+                    for data, target in val_loader:
+                        output = model(data)
+                        loss = criterion(output, target)
+                        val_loss += loss.item()
+                    
+                        # Use sigmoid probabilities with 0.5 threshold (like original)
+                        probabilities = torch.sigmoid(output)
+                        predicted = (probabilities > 0.5).float()
+                        scores = probabilities  # Use probabilities for ROC curves
+                    
+                        val_total += target.numel()
+                        val_correct += (predicted == target).sum().item()
+                    
+                        val_predictions.extend(predicted.cpu().numpy())
+                        val_targets.extend(target.cpu().numpy())
+                        val_scores.extend(scores.cpu().numpy())
+            
+                # Calculate validation metrics
+                val_pred_all = np.array(val_predictions)
+                val_target_all = np.array(val_targets)
+            
+                # Overall weighted F1
+                try:
+                    val_f1_weighted = f1_score(val_target_all, val_pred_all, average='weighted', zero_division=0)
+                except:
+                    val_f1_weighted = 0.0
+                val_f1s.append(val_f1_weighted)
+            
+                # Per-class F1 scores
+                try:
+                    val_f1_class = f1_score(val_target_all, val_pred_all, average=None, zero_division=0)
+                    for i in range(4):
+                        val_f1_per_class[i].append(val_f1_class[i])
+                except:
+                    # If there are no positive samples for a class, set F1 to 0
+                    for i in range(4):
+                        val_f1_per_class[i].append(0.0)
+            
+                # Per-class accuracy
+                for i in range(4):
+                    class_pred = val_pred_all[:, i]
+                    class_target = val_target_all[:, i]
+                    class_acc = np.mean(class_pred == class_target) * 100
+                    val_acc_per_class[i].append(class_acc)
+            
+                val_acc = 100. * val_correct / val_total
+                avg_val_loss = val_loss / len(val_loader)
+                val_losses.append(avg_val_loss)
+                val_accs.append(val_acc)
+            
+                # Log metrics including F1 scores
+                mlflow.log_metric("train_loss", avg_train_loss, step=epoch)
+                mlflow.log_metric("train_accuracy", train_acc, step=epoch)
+                mlflow.log_metric("train_f1_weighted", train_f1_weighted, step=epoch)
+            
+                # Log per-class training F1 scores
+                for i, class_name in enumerate(class_names):
+                    mlflow.log_metric(f"train_f1_{class_name}", train_f1_per_class[i][-1], step=epoch)
+                    mlflow.log_metric(f"train_acc_{class_name}", train_acc_per_class[i][-1], step=epoch)
+            
+                mlflow.log_metric("val_loss", avg_val_loss, step=epoch)
+                mlflow.log_metric("val_accuracy", val_acc, step=epoch)
+                mlflow.log_metric("val_f1_weighted", val_f1_weighted, step=epoch)
+            
+                # Log per-class validation F1 scores
+                for i, class_name in enumerate(class_names):
+                    mlflow.log_metric(f"val_f1_{class_name}", val_f1_per_class[i][-1], step=epoch)
+                    mlflow.log_metric(f"val_acc_{class_name}", val_acc_per_class[i][-1], step=epoch)
+            
+                # Print with per-class F1 scores and per-class accuracy
+                class_f1_str = ", ".join([f"{class_names[i]}: {val_f1_per_class[i][-1]:.3f}" for i in range(4)])
+                class_acc_str = ", ".join([f"{class_names[i]}: {val_acc_per_class[i][-1]:.1f}%" for i in range(4)])
+                print(f'Epoch {epoch+1}/{epochs}: Train Loss: {avg_train_loss:.4f}, Train Acc: {train_acc:.2f}%, Train F1: {train_f1_weighted:.4f}, Val Loss: {avg_val_loss:.4f}, Val Acc: {val_acc:.2f}%, Val F1: {val_f1_weighted:.4f}')
+                print(f'  Val F1 per class: {class_f1_str}')
+                print(f'  Val Acc per class: {class_acc_str}')
+        
+            # Final comprehensive evaluation
+            val_predictions = np.array(val_predictions)
+            val_targets = np.array(val_targets)
+            val_scores = np.array(val_scores)
+        
+            # Calculate final metrics
+            try:
+                final_f1_weighted = f1_score(val_targets, val_predictions, average='weighted', zero_division=0)
+                final_f1_per_class = f1_score(val_targets, val_predictions, average=None, zero_division=0)
+            except:
+                final_f1_weighted = 0.0
+                final_f1_per_class = [0.0] * 4
+        
+            # Calculate final per-class accuracy
+            final_acc_per_class = []
+            for i in range(4):
+                class_pred = val_predictions[:, i]
+                class_target = val_targets[:, i]
+                class_acc = np.mean(class_pred == class_target) * 100
+                final_acc_per_class.append(class_acc)
+        
+            mlflow.log_metric("final_val_f1_weighted", final_f1_weighted)  # Log final F1
+        
+            # Log per-class final F1 scores
+            for i, class_name in enumerate(class_names):
+                mlflow.log_metric(f"final_val_f1_{class_name}", final_f1_per_class[i])
+                mlflow.log_metric(f"final_val_acc_{class_name}", final_acc_per_class[i])
+        
+            # Log classification report as text artifact
+            report = classification_report(val_targets, val_predictions, 
+                                         target_names=class_names, 
+                                         output_dict=True,
+                                         zero_division=0)
+        
+            # Log metrics for each class (including macro F1)
+            for i, class_name in enumerate(class_names):
+                mlflow.log_metric(f"val_precision_{class_name}", report[class_name]['precision'])
+                mlflow.log_metric(f"val_recall_{class_name}", report[class_name]['recall'])
+                mlflow.log_metric(f"val_f1_{class_name}", report[class_name]['f1-score'])
+        
+            # Also log macro and weighted averages
+            mlflow.log_metric("val_f1_macro", report['macro avg']['f1-score'])
+            mlflow.log_metric("val_f1_weighted", report['weighted avg']['f1-score'])
+        
+            # Save classification report
+            report_text = classification_report(val_targets, val_predictions, 
+                                              target_names=class_names,
+                                              zero_division=0)
+            with open("classification_report.txt", "w") as f:
+                f.write(report_text)
+            mlflow.log_artifact("classification_report.txt")
+        
+            # Create and log confusion matrices
+            cm_fig = plot_confusion_matrices(val_targets, val_predictions, class_names)
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
+                cm_fig.savefig(tmp_file.name, dpi=150, bbox_inches='tight')
+                mlflow.log_artifact(tmp_file.name, "confusion_matrices")
+                os.unlink(tmp_file.name)
+            plt.close(cm_fig)
+        
+            # Create and log ROC curves
+            roc_fig = plot_roc_curves(val_targets, val_scores, class_names)
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
+                roc_fig.savefig(tmp_file.name, dpi=150, bbox_inches='tight')
+                mlflow.log_artifact(tmp_file.name, "roc_curves")
+                os.unlink(tmp_file.name)
+            plt.close(roc_fig)
+        
+            # Create and log prediction examples
+            pred_examples_fig = plot_prediction_examples(model, val_loader, class_names)
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
+                pred_examples_fig.savefig(tmp_file.name, dpi=150, bbox_inches='tight')
+                mlflow.log_artifact(tmp_file.name, "prediction_examples")
+                os.unlink(tmp_file.name)
+            plt.close(pred_examples_fig)
+        
+            # Create final training plot (with global F1 only) - ONLY FINAL PLOT IN training_plots
+            final_main_fig = create_training_plots(train_losses, val_losses, train_accs, val_accs, train_f1s, val_f1s, epochs-1)
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
+                final_main_fig.savefig(tmp_file.name, dpi=150, bbox_inches='tight')
+                mlflow.log_artifact(tmp_file.name, "training_plots")  # Only final plot goes here
+                os.unlink(tmp_file.name)
+            plt.close(final_main_fig)
+        
+            # Create final per-class F1 plot
+            final_per_class_fig = create_f1_per_class_plot(train_f1_per_class, val_f1_per_class, epochs-1, class_names)
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
+                final_per_class_fig.savefig(tmp_file.name, dpi=150, bbox_inches='tight')
+                mlflow.log_artifact(tmp_file.name, "f1_scores")  # New directory
+                os.unlink(tmp_file.name)
+            plt.close(final_per_class_fig)
+        
+            # Create final per-class accuracy plot
+            final_per_class_acc_fig = create_accuracy_per_class_plot(train_acc_per_class, val_acc_per_class, epochs-1, class_names)
+            with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_file:
+                final_per_class_acc_fig.savefig(tmp_file.name, dpi=150, bbox_inches='tight')
+                mlflow.log_artifact(tmp_file.name, "accuracy_scores")  # New directory
+                os.unlink(tmp_file.name)
+            plt.close(final_per_class_acc_fig)
+        
+            # Log model with input example
+            sample_batch, _ = next(iter(train_loader))
+            input_example = sample_batch[:1].numpy()
+        
+            mlflow.pytorch.log_model(
+                pytorch_model=model,
+                name="model",
+                input_example=input_example,
+                pip_requirements=[
+                    "torch>=2.0.0",
+                    "numpy>=1.21.0",
+                    "mlflow>=2.0.0",
+                    "matplotlib>=3.5.0",
+                    "seaborn>=0.11.0",
+                    "scikit-learn>=1.0.0"
+                ]
+            )
+        
+            # Enhanced model summary - ADD F1 score
+            final_f1_per_class_str = ", ".join([f"{class_names[i]}: {final_f1_per_class[i]:.4f}" for i in range(4)])
+            final_acc_per_class_str = ", ".join([f"{class_names[i]}: {final_acc_per_class[i]:.2f}%" for i in range(4)])
+            model_summary = f"""
+            Model Architecture: {model.arch_name}
+            Input Channels: {model.input_channels}
+            Feature Output Size: {model.feature_output_size}
+            Total Parameters: {total_params:,}
+            Trainable Parameters: {trainable_params:,}
+            Layers: {len(model.layers_config)}
+        
+            Training Configuration:
+            - Epochs: {epochs}
+            - Learning Rate: {learning_rate}
+            - Batch Size: {train_loader.batch_size}
+            - Optimizer: Adam
+            - Loss Function: BCEWithLogitsLoss
+            - Final Validation Accuracy: {val_acc:.2f}%
+            - Final Validation Weighted F1-Score: {final_f1_weighted:.4f}
+            - Final Validation Per-Class F1-Scores: {final_f1_per_class_str}
+            - Final Validation Per-Class Accuracy: {final_acc_per_class_str}
+        
+            Class-wise Performance:
+            {report_text}
+            """
+        
+            with open("model_summary.txt", "w") as f:
+                f.write(model_summary)
+            mlflow.log_artifact("model_summary.txt")
+        
+            print(f"Enhanced training completed. MLflow run ID: {mlflow.active_run().info.run_id}")
+            print(f"Final Weighted F1-Score: {final_f1_weighted:.4f}")
+            print(f"Final Per-Class F1-Scores: {final_f1_per_class_str}")
+            print(f"Final Per-Class Accuracy: {final_acc_per_class_str}")
+            print(f"Logged artifacts: training_plots (final only), f1_scores, accuracy_scores, confusion_matrices, roc_curves, prediction_examples")
+        
+            return model
+    # New function for per-class accuracy plots
+    def create_accuracy_per_class_plot(train_acc_per_class, val_acc_per_class, epoch, class_names):
+        """Create plots showing accuracy per class"""
+        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+        axes = axes.ravel()
+    
+        for i, class_name in enumerate(class_names):
+            epochs_range = range(1, epoch + 2)
+            axes[i].plot(epochs_range, train_acc_per_class[i], 'b-', label=f'Training Accuracy')
+            axes[i].plot(epochs_range, val_acc_per_class[i], 'r-', label=f'Validation Accuracy')
+            axes[i].set_title(f'Accuracy - {class_name}')
+            axes[i].set_xlabel('Epoch')
+            axes[i].set_ylabel('Accuracy (%)')
+            axes[i].set_ylim(0, 100)
+            axes[i].legend()
+            axes[i].grid(True)
+        
+            # Add final values as text
+            if len(val_acc_per_class[i]) > 0:
+                final_val_acc = val_acc_per_class[i][-1]
+                axes[i].text(0.02, 0.98, f'Final Val Acc: {final_val_acc:.1f}%', 
+                            transform=axes[i].transAxes, verticalalignment='top',
+                            bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+    
+        plt.tight_layout()
+        return fig
+    
+    def evaluate_model(model, test_loader):
+        """
+        Evaluate the model and log metrics
+        """
+        model.eval()
+        correct = 0
+        total = 0
+    
+        with torch.no_grad():
+            for data, target in test_loader:
+                outputs = model(data)
+                _, predicted = torch.max(outputs.data, 1)
+                total += target.size(0)
+                correct += (predicted == target).sum().item()
+    
+        accuracy = 100 * correct / total
+    
+        # Log evaluation metrics if MLflow is active
+        if mlflow.active_run():
+            mlflow.log_metric("test_accuracy", accuracy)
+    
+        return accuracy
+
+    def predict_single_image(model, image_array, threshold=0.0):
+        """
+        Predict a single image with your trained multi-label model
+    
+        Args:
+            model: Trained PyTorch model
+            image_array: numpy array of shape (H, W) or (H, W, C)
+            threshold: threshold for converting logits to binary predictions (default 0.0)
+    
+        Returns:
+            predictions: numpy array of shape (4,) with binary values [0, 1, 0, 1]
+            logits: raw model outputs before thresholding
+        """
+        model.eval()  # Set model to evaluation mode
+    
+        # Preprocess the image to match training format
+        if len(image_array.shape) == 2:  # (H, W) - Grayscale
+            processed_image = np.expand_dims(image_array, axis=0)  # -> (1, H, W)
+        elif len(image_array.shape) == 3:  # (H, W, 3) - RGB
+            # Convert RGB to grayscale if needed
+            processed_image = np.dot(image_array[...,:3], [0.2989, 0.5870, 0.1140])
+            processed_image = np.expand_dims(processed_image, axis=0)  # -> (1, H, W)
+    
+        # Normalize and convert to tensor
+        processed_image = torch.FloatTensor(processed_image) / 255.0
+        processed_image = processed_image.unsqueeze(0)  # Add batch dimension -> (1, 1, H, W)
+    
+        with torch.no_grad():  # Disable gradient computation for inference
+            logits = model(processed_image)
+            predictions = (logits > threshold).float()  # Apply threshold to get binary predictions
+    
+        return predictions.numpy()[0], logits.numpy()[0]  # Remove batch dimension
+
+    def predict_batch(model, image_batch, threshold=0.0):
+        """
+        Predict a batch of images
+    
+        Args:
+            model: Trained PyTorch model
+            image_batch: numpy array of shape (N, H, W) or (N, H, W, 1) or (N, H, W, 3)
+            threshold: threshold for converting logits to binary predictions
+    
+        Returns:
+            predictions: numpy array of shape (N, 4) with binary values
+            logits: raw model outputs before thresholding
+        """
+        model.eval()
+    
+        # Convert to tensor and preprocess
+        if isinstance(image_batch, np.ndarray):
+            image_batch = torch.FloatTensor(image_batch)
+    
+        # Normalize
+        image_batch = image_batch / 255.0
+    
+        # Add channel dimension if needed
+        if len(image_batch.shape) == 3:  # (N, H, W)
+            image_batch = image_batch.unsqueeze(1)  # -> (N, 1, H, W)
+        elif len(image_batch.shape) == 4 and image_batch.shape[3] == 3:  # (N, H, W, 3)
+            # Convert RGB to grayscale
+            image_batch = torch.matmul(image_batch, torch.tensor([0.2989, 0.5870, 0.1140], dtype=torch.float32))
+            image_batch = image_batch.unsqueeze(1)  # -> (N, 1, H, W)
+    
+        with torch.no_grad():
+            logits = model(image_batch)
+            predictions = (logits > threshold).float()
+    
+        return predictions.numpy(), logits.numpy()
+
+    # To interpret the results:
+    def interpret_predictions(predictions, class_names=["forward", "back", "left", "right"]):
+        """
+        Interpret the model predictions
+        """
+        result = {}
+        for i, pred in enumerate(predictions):
+            result[class_names[i]] = int(pred)
+    
+        # Print human-readable result
+        active_actions = [class_names[i] for i, pred in enumerate(predictions) if pred > 0]
+        print(f"Predicted actions: {active_actions}")
+        print(f"Detailed: {result}")
+    
+        return result
+    return (
+        FlexibleCNN,
+        interpret_predictions,
+        predict_single_image,
+        torch,
+        train_model,
+    )
+
+
+@app.cell
+def _(np, torch):
+    from torch.utils.data import Dataset, DataLoader
+
+    class ImageDataset(Dataset):
+        def __init__(self, images_df, labels_df):
+            """
+            images_df: Polars DataFrame with image arrays
+            labels_df: Polars DataFrame with one-hot encoded labels (multi-label format)
+            """
+            self.images = images_df[images_df.columns[0]].to_list()
+            # Keep one-hot encoded labels for multi-label classification
+            self.labels = labels_df.to_numpy().astype(np.float32)  # Convert to float32
+        
+        def __len__(self):
+            return len(self.images)
+    
+        def __getitem__(self, idx):
+            image = self.images[idx]
+            label = self.labels[idx]  # This is already one-hot encoded
+        
+            # Handle image dimensions
+            if len(image.shape) == 2:  # (H, W) - Grayscale
+                image = np.expand_dims(image, axis=0)  # -> (1, H, W)
+            elif len(image.shape) == 3:  # (H, W, 3) - RGB
+                # Convert RGB to grayscale if needed
+                image = np.dot(image[...,:3], [0.2989, 0.5870, 0.1140])
+                image = np.expand_dims(image, axis=0)  # -> (1, H, W)
+        
+            # Convert to tensor and normalize
+            image = torch.FloatTensor(image) / 255.0
+            label = torch.FloatTensor(label)  # Keep as one-hot vector for multi-label
+        
+            return image, label
+    return DataLoader, ImageDataset
+
+
+@app.cell
+def _(DataLoader, ImageDataset, X_test, X_train, y_test, y_train):
+    # Create datasets and data loaders
+    train_dataset = ImageDataset(X_train, y_train)
+    test_dataset = ImageDataset(X_test, y_test)
+
+    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
+    test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+    return test_loader, train_loader
+
+
+@app.cell
+def _(X_train):
+    sample_image = X_train[X_train.columns[0]].to_list()[0]
+    print(f"Actual image shape: {sample_image.shape}")
+
+    # Now create the model with the correct dimensions
+    # If your images are (H, W), use those dimensions
+    input_height, input_width = sample_image.shape[:2]  # For (H, W) or (H, W, C)
+    return input_height, input_width
+
+
+@app.cell
+def _(
+    FlexibleCNN,
+    architectures,
+    input_height,
+    input_width,
+    test_loader,
+    train_loader,
+    train_model,
+):
+
+    model = FlexibleCNN(architectures[0], input_channels=1, input_height=input_height, input_width=input_width)
+
+    print(f"Model '{model.arch_name}' created with {model.input_channels} input channel(s) and MLflow integration.")
+
+    train_model(model, train_loader, test_loader, epochs=10, learning_rate=0.001, experiment_name="basic2_cnn_experiment")
+    return (model,)
+
+
+@app.cell
+def _(X_train):
+    images = X_train["2d_array_image_preprocessed"].to_list()
+
+    first_image = images[5]
+
+    first_image.shape
+    return (first_image,)
+
+
+@app.cell
+def _(Image, first_image):
+    first_pil_image = Image.fromarray(first_image.astype('uint8'), mode='L')
+
+    # Display the image
+    first_pil_image
     return
 
 
 @app.cell
-def _():
+def _(first_image, interpret_predictions, model, predict_single_image):
+    first_image_prediction, first_image_logits = predict_single_image(model, first_image)
+
+    # Interpret the predictions
+    interpret_predictions(first_image_prediction)
     return
 
 
