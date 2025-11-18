@@ -16,6 +16,9 @@ def _():
     import io
     import copy
     import seaborn as sns
+    import matplotlib
+
+    matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     from sklearn.model_selection import train_test_split
     import joblib
@@ -480,11 +483,17 @@ def _():
             "simple_cnn",
             [
                 # Feature extraction
-                ("conv", {"out_channels": 8, "kernel_size": 3, "stride": 1, "padding": 1}),
+                (
+                    "conv",
+                    {"out_channels": 8, "kernel_size": 3, "stride": 1, "padding": 1},
+                ),
                 ("relu", {}),
                 ("maxpool", {"kernel_size": 2, "stride": 2}),
                 ("dropout", {"p": 0.2}),
-                ("conv", {"out_channels": 8, "kernel_size": 3, "stride": 1, "padding": 1}),
+                (
+                    "conv",
+                    {"out_channels": 8, "kernel_size": 3, "stride": 1, "padding": 1},
+                ),
                 ("relu", {}),
                 ("maxpool", {"kernel_size": 2, "stride": 2}),
                 ("dropout", {"p": 0.2}),
@@ -534,9 +543,7 @@ def _(datetime, np, plt, sns):
             classifier_configs = layers[first_linear_idx:]
 
             # Calculate the flattened size after features
-            self.features = self._build_sequential_with_channels(
-                feature_configs
-            )
+            self.features = self._build_sequential_with_channels(feature_configs)
             self.feature_output_size = self._get_feature_output_size(
                 input_height, input_width
             )
@@ -558,9 +565,7 @@ def _(datetime, np, plt, sns):
                     else:
                         updated_classifier_configs.append((layer_type, params))
 
-                self.classifier = self._build_sequential(
-                    updated_classifier_configs
-                )
+                self.classifier = self._build_sequential(updated_classifier_configs)
             else:
                 self.classifier = nn.Identity()
 
@@ -634,8 +639,14 @@ def _(datetime, np, plt, sns):
             return x
 
     def create_training_plots(
-        train_losses, val_losses, train_f1s, val_f1s, 
-        train_f1_per_class, val_f1_per_class, epoch, class_names
+        train_losses,
+        val_losses,
+        train_f1s,
+        val_f1s,
+        train_f1_per_class,
+        val_f1_per_class,
+        epoch,
+        class_names,
     ):
         """Create training plots with Model Loss, Weighted F1-Score, and Per-Class F1-Scores"""
         fig, axes = plt.subplots(1, 3, figsize=(18, 5))
@@ -661,30 +672,30 @@ def _(datetime, np, plt, sns):
         # Per-class F1 scores
         epochs_range = range(1, epoch + 2)
         colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
-    
+
         for i, class_name in enumerate(class_names):
             axes[2].plot(
-                epochs_range, 
-                train_f1_per_class[i], 
-                color=colors[i], 
-                linestyle="-", 
+                epochs_range,
+                train_f1_per_class[i],
+                color=colors[i],
+                linestyle="-",
                 alpha=0.7,
-                label=f"Train {class_name}"
+                label=f"Train {class_name}",
             )
             axes[2].plot(
-                epochs_range, 
-                val_f1_per_class[i], 
-                color=colors[i], 
-                linestyle="--", 
+                epochs_range,
+                val_f1_per_class[i],
+                color=colors[i],
+                linestyle="--",
                 alpha=0.9,
-                label=f"Val {class_name}"
+                label=f"Val {class_name}",
             )
-    
+
         axes[2].set_title("Per-Class F1-Scores")
         axes[2].set_xlabel("Epoch")
         axes[2].set_ylabel("F1-Score")
         axes[2].set_ylim(0, 1)
-        axes[2].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        axes[2].legend(bbox_to_anchor=(1.05, 1), loc="upper left")
         axes[2].grid(True)
 
         plt.tight_layout()
@@ -874,7 +885,13 @@ def _(datetime, np, plt, sns):
         import matplotlib.pyplot as plt
         import seaborn as sns
         import numpy as np
-        from sklearn.metrics import classification_report, confusion_matrix, roc_curve, auc, f1_score
+        from sklearn.metrics import (
+            classification_report,
+            confusion_matrix,
+            roc_curve,
+            auc,
+            f1_score,
+        )
         import tempfile
         import os
 
@@ -1171,10 +1188,14 @@ def _(datetime, np, plt, sns):
                 val_targets, val_predictions, target_names=class_names, zero_division=0
             )
             # Create temp file, write content, and close the file handle before logging
-            tmp_report_file = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False)
+            tmp_report_file = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".txt", delete=False
+            )
             tmp_report_file.write(report_text)
             tmp_report_file.close()  # Close the file handle
-            mlflow.log_artifact(tmp_report_file.name, "reports/classification_report.txt")
+            mlflow.log_artifact(
+                tmp_report_file.name, "reports/classification_report.txt"
+            )
             os.unlink(tmp_report_file.name)  # Delete the temporary file after logging
 
             # Create and log model summary in temporary file - CORRECTED VERSION
@@ -1207,7 +1228,9 @@ def _(datetime, np, plt, sns):
             {report_text}
             """
             # Create temp file, write content, and close the file handle before logging
-            tmp_summary_file = tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False)
+            tmp_summary_file = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".txt", delete=False
+            )
             tmp_summary_file.write(model_summary)
             tmp_summary_file.close()  # Close the file handle
             mlflow.log_artifact(tmp_summary_file.name, "reports/model_summary.txt")
@@ -1249,7 +1272,7 @@ def _(datetime, np, plt, sns):
                 train_f1_per_class,
                 val_f1_per_class,
                 epochs - 1,
-                class_names
+                class_names,
             )
             tmp_train_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
             final_main_fig.savefig(tmp_train_file.name, dpi=150, bbox_inches="tight")
@@ -1290,7 +1313,7 @@ def _(datetime, np, plt, sns):
 
             mlflow.pytorch.log_model(
                 pytorch_model=model,
-                name="model",
+                name=f"{run_name}_model",
                 input_example=input_example,
                 pip_requirements=[
                     "torch>=2.0.0",
@@ -1313,6 +1336,7 @@ def _(datetime, np, plt, sns):
             )
 
             return model
+
     # New function for per-class accuracy plots
     def create_accuracy_per_class_plot(
         train_acc_per_class, val_acc_per_class, epoch, class_names
@@ -1468,7 +1492,7 @@ def _(datetime, np, plt, sns):
         print(f"Detailed: {result}")
 
         return result
-    return FlexibleCNN, torch, train_model
+    return FlexibleCNN, mlflow, torch, train_model
 
 
 @app.cell
@@ -1536,6 +1560,8 @@ def _(
     architectures,
     input_height,
     input_width,
+    mlflow,
+    os,
     test_loader,
     train_loader,
     train_model,
@@ -1551,6 +1577,18 @@ def _(
         f"Model '{model.arch_name}' created with {model.input_channels} input channel(s) and MLflow integration."
     )
 
+    # Use a local path relative to your script's directory
+    local_mlruns_path = os.path.abspath("./mlruns")
+    mlflow.set_tracking_uri(f"file://{local_mlruns_path}")
+
+    # Ensure the directory exists and is writable
+    os.makedirs(local_mlruns_path, exist_ok=True)
+    assert os.access(local_mlruns_path, os.W_OK), (
+        f"MLflow directory '{local_mlruns_path}' not writable!"
+    )
+
+    print(f"MLflow tracking URI: {mlflow.get_tracking_uri()}")
+
     train_model(
         model,
         train_loader,
@@ -1558,7 +1596,7 @@ def _(
         epochs=20,
         learning_rate=0.001,
         experiment_name="cnn_experiment",
-        run_name="simple_cnn_without_sigmoid"
+        run_name="simple_cnn_calypso",
     )
     return
 
