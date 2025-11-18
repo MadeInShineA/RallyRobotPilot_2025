@@ -483,15 +483,15 @@ def _():
                 ("conv", {"out_channels": 8, "kernel_size": 3, "stride": 1, "padding": 1}),
                 ("relu", {}),
                 ("maxpool", {"kernel_size": 2, "stride": 2}),
-                ("dropout", {"p": 0.25}),
+                ("dropout", {"p": 0.4}),
                 ("conv", {"out_channels": 8, "kernel_size": 3, "stride": 1, "padding": 1}),
                 ("relu", {}),
                 ("maxpool", {"kernel_size": 2, "stride": 2}),
-                ("dropout", {"p": 0.25}),
+                ("dropout", {"p": 0.4}),
                 # Classifier
                 ("linear", {"out_features": 16}),
                 ("relu", {}),
-                ("dropout", {"p": 0.25}),
+                ("dropout", {"p": 0.4}),
                 ("linear", {"out_features": 4}),
                 ("sigmoid", {}),  # Final activation for multi-label output
             ],
@@ -501,7 +501,7 @@ def _():
 
 
 @app.cell
-def _(np, plt, sns):
+def _(datetime, np, plt, sns):
     import torch
     import torch.nn as nn
     import mlflow
@@ -515,10 +515,9 @@ def _(np, plt, sns):
         ):
             super(FlexibleCNN, self).__init__()
 
-            name, layers, activation_name = arch_config
+            name, layers = arch_config
             self.arch_name = name
             self.layers_config = layers
-            self.activation_name = activation_name
             self.input_channels = input_channels
 
             # Identify where features end (before first linear layer)
@@ -537,7 +536,7 @@ def _(np, plt, sns):
 
             # Calculate the flattened size after features
             self.features = self._build_sequential_with_channels(
-                feature_configs, activation_name
+                feature_configs
             )
             self.feature_output_size = self._get_feature_output_size(
                 input_height, input_width
@@ -561,7 +560,7 @@ def _(np, plt, sns):
                         updated_classifier_configs.append((layer_type, params))
 
                 self.classifier = self._build_sequential(
-                    updated_classifier_configs, activation_name
+                    updated_classifier_configs
                 )
             else:
                 self.classifier = nn.Identity()
@@ -576,7 +575,7 @@ def _(np, plt, sns):
                 flattened_size = output.view(1, -1).size(1)
             return flattened_size
 
-        def _build_sequential_with_channels(self, layer_configs, activation_name):
+        def _build_sequential_with_channels(self, layer_configs):
             modules = []
             in_channels = self.input_channels
     
@@ -606,7 +605,7 @@ def _(np, plt, sns):
     
             return nn.Sequential(*modules)
 
-        def _build_sequential(self, layer_configs, activation_name):
+        def _build_sequential(self, layer_configs):
             modules = []
             for layer_type, params in layer_configs:
                 if layer_type == "linear":
@@ -883,6 +882,7 @@ def _(np, plt, sns):
         epochs=10,
         learning_rate=0.001,
         experiment_name="cnn_experiment",
+        run_name=None,
     ):
         """
         Enhanced training with comprehensive MLflow logging and graphics including weighted F1-score
@@ -897,7 +897,11 @@ def _(np, plt, sns):
         # Set up MLflow
         mlflow.set_experiment(experiment_name)
 
-        with mlflow.start_run():
+        if run_name is None:
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            run_name = f"{model.arch_name}_lr{learning_rate}_ep{epochs}_{timestamp}"
+
+        with mlflow.start_run(run_name=run_name):
             # Log comprehensive parameters
             mlflow.log_param("learning_rate", learning_rate)
             mlflow.log_param("epochs", epochs)
@@ -907,7 +911,6 @@ def _(np, plt, sns):
             mlflow.log_param("batch_size", train_loader.batch_size)
             mlflow.log_param("optimizer", "Adam")
             mlflow.log_param("loss_function", "BCEWithLogitsLoss")
-            mlflow.log_param("activation_function", model.activation_name)
 
             # Model parameters
             total_params = sum(p.numel() for p in model.parameters())
@@ -1570,6 +1573,7 @@ def _(
         epochs=20,
         learning_rate=0.001,
         experiment_name="cnn_experiment",
+        run_name="simple_cnn_0.4_dropout_"
     )
     return
 
