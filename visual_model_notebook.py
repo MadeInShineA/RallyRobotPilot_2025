@@ -483,17 +483,16 @@ def _():
                 ("conv", {"out_channels": 8, "kernel_size": 3, "stride": 1, "padding": 1}),
                 ("relu", {}),
                 ("maxpool", {"kernel_size": 2, "stride": 2}),
-                ("dropout", {"p": 0.4}),
+                ("dropout", {"p": 0.2}),
                 ("conv", {"out_channels": 8, "kernel_size": 3, "stride": 1, "padding": 1}),
                 ("relu", {}),
                 ("maxpool", {"kernel_size": 2, "stride": 2}),
-                ("dropout", {"p": 0.4}),
+                ("dropout", {"p": 0.2}),
                 # Classifier
                 ("linear", {"out_features": 16}),
                 ("relu", {}),
-                ("dropout", {"p": 0.4}),
+                ("dropout", {"p": 0.2}),
                 ("linear", {"out_features": 4}),
-                ("sigmoid", {}),  # Final activation for multi-label output
             ],
         ),
     ]
@@ -578,16 +577,16 @@ def _(datetime, np, plt, sns):
         def _build_sequential_with_channels(self, layer_configs):
             modules = []
             in_channels = self.input_channels
-    
+
             for layer_type, params in layer_configs:
                 if layer_type == "conv":
                     conv_params = params.copy()
                     conv_params["in_channels"] = in_channels
                     modules.append(nn.Conv2d(**conv_params))
-    
+
                     if "out_channels" in params:
                         in_channels = params["out_channels"]
-    
+
                     if "out_channels" in params:
                         modules.append(nn.BatchNorm2d(params["out_channels"]))
                 elif layer_type == "maxpool":
@@ -602,7 +601,7 @@ def _(datetime, np, plt, sns):
                     modules.append(nn.Tanh())
                 elif layer_type == "softmax":
                     modules.append(nn.Softmax(**params))
-    
+
             return nn.Sequential(*modules)
 
         def _build_sequential(self, layer_configs):
@@ -625,7 +624,7 @@ def _(datetime, np, plt, sns):
                 elif layer_type == "softmax":
                     modules.append(nn.Softmax(**params))
                 # Add other activation functions as needed
-    
+
             return nn.Sequential(*modules)
 
         def forward(self, x):
@@ -635,73 +634,58 @@ def _(datetime, np, plt, sns):
             return x
 
     def create_training_plots(
-        train_losses, val_losses, train_accs, val_accs, train_f1s, val_f1s, epoch
+        train_losses, val_losses, train_f1s, val_f1s, 
+        train_f1_per_class, val_f1_per_class, epoch, class_names
     ):
-        """Create comprehensive training plots including F1 scores"""
-        fig, axes = plt.subplots(2, 3, figsize=(18, 10))
+        """Create training plots with Model Loss, Weighted F1-Score, and Per-Class F1-Scores"""
+        fig, axes = plt.subplots(1, 3, figsize=(18, 5))
 
         # Training and validation loss
-        axes[0, 0].plot(range(1, epoch + 2), train_losses, "b-", label="Training Loss")
-        axes[0, 0].plot(range(1, epoch + 2), val_losses, "r-", label="Validation Loss")
-        axes[0, 0].set_title("Model Loss")
-        axes[0, 0].set_xlabel("Epoch")
-        axes[0, 0].set_ylabel("Loss")
-        axes[0, 0].legend()
-        axes[0, 0].grid(True)
+        axes[0].plot(range(1, epoch + 2), train_losses, "b-", label="Training Loss")
+        axes[0].plot(range(1, epoch + 2), val_losses, "r-", label="Validation Loss")
+        axes[0].set_title("Model Loss")
+        axes[0].set_xlabel("Epoch")
+        axes[0].set_ylabel("Loss")
+        axes[0].legend()
+        axes[0].grid(True)
 
-        # Training and validation accuracy
-        axes[0, 1].plot(
-            range(1, epoch + 2), train_accs, "b-", label="Training Accuracy"
-        )
-        axes[0, 1].plot(
-            range(1, epoch + 2), val_accs, "r-", label="Validation Accuracy"
-        )
-        axes[0, 1].set_title("Model Accuracy")
-        axes[0, 1].set_xlabel("Epoch")
-        axes[0, 1].set_ylabel("Accuracy (%)")
-        axes[0, 1].legend()
-        axes[0, 1].grid(True)
+        # Weighted F1 score
+        axes[1].plot(range(1, epoch + 2), train_f1s, "b-", label="Training F1-Score")
+        axes[1].plot(range(1, epoch + 2), val_f1s, "r-", label="Validation F1-Score")
+        axes[1].set_title("Weighted F1-Score")
+        axes[1].set_xlabel("Epoch")
+        axes[1].set_ylabel("F1-Score")
+        axes[1].legend()
+        axes[1].grid(True)
 
-        # Training and validation F1 score
-        axes[0, 2].plot(range(1, epoch + 2), train_f1s, "b-", label="Training F1-Score")
-        axes[0, 2].plot(range(1, epoch + 2), val_f1s, "r-", label="Validation F1-Score")
-        axes[0, 2].set_title("Weighted F1-Score")
-        axes[0, 2].set_xlabel("Epoch")
-        axes[0, 2].set_ylabel("F1-Score")
-        axes[0, 2].legend()
-        axes[0, 2].grid(True)
-
-        # Loss difference
-        loss_diff = np.array(train_losses) - np.array(val_losses)
-        axes[1, 0].plot(range(1, epoch + 2), loss_diff, "g-", label="Train - Val Loss")
-        axes[1, 0].axhline(y=0, color="k", linestyle="--")
-        axes[1, 0].set_title("Loss Difference (Overfitting Indicator)")
-        axes[1, 0].set_xlabel("Epoch")
-        axes[1, 0].set_ylabel("Loss Difference")
-        axes[1, 0].legend()
-        axes[1, 0].grid(True)
-
-        # Accuracy difference
-        acc_diff = np.array(val_accs) - np.array(train_accs)
-        axes[1, 1].plot(
-            range(1, epoch + 2), acc_diff, "m-", label="Val - Train Accuracy"
-        )
-        axes[1, 1].axhline(y=0, color="k", linestyle="--")
-        axes[1, 1].set_title("Accuracy Difference")
-        axes[1, 1].set_xlabel("Epoch")
-        axes[1, 1].set_ylabel("Accuracy Difference (%)")
-        axes[1, 1].legend()
-        axes[1, 1].grid(True)
-
-        # F1 score difference
-        f1_diff = np.array(val_f1s) - np.array(train_f1s)
-        axes[1, 2].plot(range(1, epoch + 2), f1_diff, "c-", label="Val - Train F1")
-        axes[1, 2].axhline(y=0, color="k", linestyle="--")
-        axes[1, 2].set_title("F1-Score Difference")
-        axes[1, 2].set_xlabel("Epoch")
-        axes[1, 2].set_ylabel("F1-Score Difference")
-        axes[1, 2].legend()
-        axes[1, 2].grid(True)
+        # Per-class F1 scores
+        epochs_range = range(1, epoch + 2)
+        colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
+    
+        for i, class_name in enumerate(class_names):
+            axes[2].plot(
+                epochs_range, 
+                train_f1_per_class[i], 
+                color=colors[i], 
+                linestyle="-", 
+                alpha=0.7,
+                label=f"Train {class_name}"
+            )
+            axes[2].plot(
+                epochs_range, 
+                val_f1_per_class[i], 
+                color=colors[i], 
+                linestyle="--", 
+                alpha=0.9,
+                label=f"Val {class_name}"
+            )
+    
+        axes[2].set_title("Per-Class F1-Scores")
+        axes[2].set_xlabel("Epoch")
+        axes[2].set_ylabel("F1-Score")
+        axes[2].set_ylim(0, 1)
+        axes[2].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+        axes[2].grid(True)
 
         plt.tight_layout()
         return fig
@@ -1260,11 +1244,12 @@ def _(datetime, np, plt, sns):
             final_main_fig = create_training_plots(
                 train_losses,
                 val_losses,
-                train_accs,
-                val_accs,
                 train_f1s,
                 val_f1s,
+                train_f1_per_class,
+                val_f1_per_class,
                 epochs - 1,
+                class_names
             )
             tmp_train_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
             final_main_fig.savefig(tmp_train_file.name, dpi=150, bbox_inches="tight")
@@ -1573,7 +1558,7 @@ def _(
         epochs=20,
         learning_rate=0.001,
         experiment_name="cnn_experiment",
-        run_name="simple_cnn_0.4_dropout_"
+        run_name="simple_cnn_without_sigmoid"
     )
     return
 
