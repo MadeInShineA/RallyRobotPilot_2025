@@ -53,12 +53,20 @@ class DataCollectionUI(QtWidgets.QMainWindow):
         self.resetButton.clicked.connect(self.resetNForget)
 
         self.autopiloting = False
+        self.recording_forced_by_autopilot = False
 
         def toggle_autopilot():
+            old_recording = self.recording
             self.autopiloting = not self.autopiloting
             self.AutopilotButton.setText(
                 "AutoPilot:\n" + ("ON" if self.autopiloting else "OFF")
             )
+            if self.autopiloting and not old_recording:
+                self.toggleRecord()
+                self.recording_forced_by_autopilot = True
+            elif not self.autopiloting and self.recording_forced_by_autopilot:
+                self.toggleRecord()
+                self.recording_forced_by_autopilot = False
 
         self.AutopilotButton.clicked.connect(toggle_autopilot)
         self.message_processing_callback = message_processing_callback
@@ -79,7 +87,7 @@ class DataCollectionUI(QtWidgets.QMainWindow):
 
     def collectMsg(self, msg):
         if self.recording:
-            if not self.saveImgCheckBox.isChecked():
+            if not self.saveImgCheckBox.isChecked() and not self.autopiloting:
                 msg.image = None
 
             self.recorded_data.append(msg)
