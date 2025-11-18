@@ -94,7 +94,9 @@ class MLflowModelNNMsgProcessor:
         # --- Extract Image from Message ---
         # Adjust this line based on the actual structure of 'message'
         # Assuming message has an attribute like 'image', 'frame', or 'screenshot'
-        pil_image = Image.fromarray(message.image) if message.image is not None else None  # Convert numpy array to PIL Image
+        pil_image = (
+            Image.fromarray(message.image) if message.image is not None else None
+        )  # Convert numpy array to PIL Image
 
         if pil_image is None:
             print("Warning: Received message with no image. Sending no commands.")
@@ -150,6 +152,7 @@ class MLflowModelNNMsgProcessor:
 
 if __name__ == "__main__":
     import sys
+    import os
 
     def except_hook(cls, exception, traceback):
         sys.__excepthook__(cls, exception, traceback)
@@ -157,20 +160,18 @@ if __name__ == "__main__":
     sys.excepthook = except_hook
 
     parser = argparse.ArgumentParser(description="Visual Autopilot with MLflow model")
-    parser.add_argument("run_id", help="MLflow run ID for the model")
+    parser.add_argument(
+        "model_id",  # Positional argument (no dashes)
+        help="MLflow model ID (e.g., m-c3cab6f7f7da4101a6ba02e2ef9796f0)",
+    )
     args = parser.parse_args()
 
-    # --- IMPORTANT: Set the correct MLflow model URI here ---
-    # This should point to the 'model' artifact logged by your marimo notebook.
-    # Example: If the notebook ran locally and used default mlruns, it might be:
-    # mlflow_model_uri = "runs:/<RUN_ID>/model"
-    # Or if you saved it locally after training:
-    # mlflow_model_uri = "./path/to/your/saved/mlflow/model"
-    # You need to find the run ID and artifact path from your MLflow tracking server/UI.
-    mlflow_model_uri = f"runs:/{args.run_id}/model"
+    # Construct the path using the provided model ID
+    base_path = "./mlruns/891533531804789206/models"
+    model_uri = os.path.join(base_path, args.model_id, "artifacts")
 
     try:
-        nn_brain = MLflowModelNNMsgProcessor(model_uri=mlflow_model_uri)
+        nn_brain = MLflowModelNNMsgProcessor(model_uri=model_uri)
     except Exception as e:
         print(f"Failed to initialize NN processor: {e}")
         sys.exit(1)
@@ -180,3 +181,4 @@ if __name__ == "__main__":
     data_window.show()
 
     app.exec()
+
