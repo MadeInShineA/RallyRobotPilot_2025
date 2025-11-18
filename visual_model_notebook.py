@@ -23,6 +23,7 @@ def _():
     from sklearn.model_selection import train_test_split
     import joblib
     import json
+
     return Image, json, mo, np, os, pl, plt, sns, train_test_split
 
 
@@ -123,7 +124,9 @@ def _(df):
 
 @app.cell
 def _(mo):
-    mo.md(r"""### Clean the first frames of each record when nothing happens (all inputs are 0)""")
+    mo.md(
+        r"""### Clean the first frames of each record when nothing happens (all inputs are 0)"""
+    )
     return
 
 
@@ -204,6 +207,7 @@ def _(Image):
             size, Image.Resampling.LANCZOS
         )  # Resize to exact dimensions
         return image
+
     return (preprocess_image,)
 
 
@@ -266,6 +270,7 @@ def _(pl, sns):
             hue="control",
             palette=["green", "red", "blue", "orange"],
         )
+
     return (plot_controls,)
 
 
@@ -307,7 +312,7 @@ def _(pl, plt, sns):
         # Prepare data for heatmap
         control_cols = [
             "forward_usage",
-            "back_usage", 
+            "back_usage",
             "left_usage",
             "right_usage",
             "nothing_usage",
@@ -316,30 +321,29 @@ def _(pl, plt, sns):
 
         # Create a DataFrame for seaborn
         heatmap_df = usage_df.select(control_cols + ["record"]).to_pandas()
-        heatmap_df = heatmap_df.set_index('record')
-    
+        heatmap_df = heatmap_df.set_index("record")
+
         # Create figure and axis
         fig, ax = plt.subplots(figsize=(12, max(4, 0.5 * len(records_sorted))))
-    
+
         # Plot heatmap using seaborn
         sns.heatmap(
             heatmap_df,
             annot=True,
-            fmt='.2f',
-            cmap="Blues", 
-            cbar_kws={'label': 'Fraction of time active'},
-            ax=ax
+            fmt=".2f",
+            cmap="Blues",
+            cbar_kws={"label": "Fraction of time active"},
+            ax=ax,
         )
 
         ax.set_title("Control Usage per Record")
         ax.set_xticklabels(
-            ["Forward", "Back", "Left", "Right", "Nothing"], 
-            rotation=45, 
-            ha="right"
+            ["Forward", "Back", "Left", "Right", "Nothing"], rotation=45, ha="right"
         )
-    
+
         plt.tight_layout()
         return ax
+
     return (plot_usage,)
 
 
@@ -1486,6 +1490,7 @@ def _(datetime, np, plt, sns):
         print(f"Detailed: {result}")
 
         return result
+
     return FlexibleCNN, mlflow, torch, train_model
 
 
@@ -1523,6 +1528,7 @@ def _(np, torch):
             label = torch.FloatTensor(label)  # Keep as one-hot vector for multi-label
 
             return image, label
+
     return DataLoader, ImageDataset
 
 
@@ -1560,6 +1566,12 @@ def _(
     train_loader,
     train_model,
 ):
+    from dotenv import load_dotenv
+
+    load_dotenv()
+
+    experiment_name = os.getenv("MLFLOW_EXPERIMENT_NAME", "default_cnn_experiment")
+
     model = FlexibleCNN(
         architectures[0],
         input_channels=1,
@@ -1570,7 +1582,6 @@ def _(
     print(
         f"Model '{model.arch_name}' created with {model.input_channels} input channel(s) and MLflow integration."
     )
-
     # Use a local path relative to your script's directory
     local_mlruns_path = os.path.abspath("./mlruns")
     mlflow.set_tracking_uri(f"file://{local_mlruns_path}")
@@ -1589,7 +1600,7 @@ def _(
         test_loader,
         epochs=20,
         learning_rate=0.001,
-        experiment_name="cnn_experiment",
+        experiment_name=experiment_name,
         run_name="simple_cnn_calypso",
     )
     return

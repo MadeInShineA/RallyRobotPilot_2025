@@ -5,3 +5,4 @@ model/
 genetic_data/
 visual_records/
 records/
+.env
