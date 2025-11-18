@@ -276,8 +276,8 @@ def _(df_cleaned_pil_preprocessed, plot_controls):
 
 
 @app.cell
-def _(np, pl, plt):
-    def plot_usage(df) -> None:
+def _(pl, plt, sns):
+    def plot_usage(df) -> plt.Axes:
         # Ensure we have a 'nothing' column: 1 when all controls are 0
         df = df.with_columns(
             nothing=(
@@ -307,45 +307,39 @@ def _(np, pl, plt):
         # Prepare data for heatmap
         control_cols = [
             "forward_usage",
-            "back_usage",
+            "back_usage", 
             "left_usage",
             "right_usage",
             "nothing_usage",
         ]
-        usage_matrix = usage_df.select(control_cols).to_numpy()
         records_sorted = usage_df["record"].to_list()
 
-        # Plot heatmap
-        _fig, _ax = plt.subplots(figsize=(12, max(4, 0.5 * len(records_sorted))))
-        _im = _ax.imshow(usage_matrix, cmap="Blues", aspect="auto")
-
-        # Set ticks
-        _ax.set_yticks(np.arange(len(records_sorted)))
-        _ax.set_yticklabels(records_sorted)
-        _ax.set_xticks(np.arange(len(control_cols)))
-        _ax.set_xticklabels(
-            ["Forward", "Back", "Left", "Right", "Nothing"], rotation=45, ha="right"
+        # Create a DataFrame for seaborn
+        heatmap_df = usage_df.select(control_cols + ["record"]).to_pandas()
+        heatmap_df = heatmap_df.set_index('record')
+    
+        # Create figure and axis
+        fig, ax = plt.subplots(figsize=(12, max(4, 0.5 * len(records_sorted))))
+    
+        # Plot heatmap using seaborn
+        sns.heatmap(
+            heatmap_df,
+            annot=True,
+            fmt='.2f',
+            cmap="Blues", 
+            cbar_kws={'label': 'Fraction of time active'},
+            ax=ax
         )
 
-        # Add colorbar
-        plt.colorbar(_im, ax=_ax, label="Fraction of time active")
-
-        # Add text annotations
-        for _i in range(len(records_sorted)):
-            for _j in range(len(control_cols)):
-                _val = usage_matrix[_i, _j]
-                text = _ax.text(
-                    _j,
-                    _i,
-                    f"{_val:.2f}",
-                    ha="center",
-                    va="center",
-                    color="black" if _val < 0.5 else "white",
-                )
-
-        _ax.set_title("Control Usage per Record")
+        ax.set_title("Control Usage per Record")
+        ax.set_xticklabels(
+            ["Forward", "Back", "Left", "Right", "Nothing"], 
+            rotation=45, 
+            ha="right"
+        )
+    
         plt.tight_layout()
-        plt.show()
+        return ax
     return (plot_usage,)
 
 
