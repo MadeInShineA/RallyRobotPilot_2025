@@ -31,7 +31,10 @@ def _():
     import mlflow.pytorch
     from sklearn.metrics import classification_report, confusion_matrix, roc_curve, auc
     import tempfile
+    from torch.utils.data import Dataset, DataLoader
     return (
+        DataLoader,
+        Dataset,
         Image,
         auc,
         confusion_matrix,
@@ -235,6 +238,7 @@ def _(Image):
 @app.cell
 def _(df_cleaned, pl, preprocess_image):
     images_dimensions = (90, 160)
+    images_width, images_height = images_dimensions
 
     df_cleaned_pil_preprocessed = df_cleaned.with_columns(
         pl.col("image")
@@ -244,7 +248,7 @@ def _(df_cleaned, pl, preprocess_image):
         )
         .alias("image_preprocessed")
     )
-    return (df_cleaned_pil_preprocessed,)
+    return df_cleaned_pil_preprocessed, images_height, images_width
 
 
 @app.cell
@@ -391,16 +395,20 @@ def _(Image, df_cleaned_pil_preprocessed, pl):
 
     # Apply augmentations
     augmented_rows = []
-    for row in df_cleaned_pil_preprocessed.iter_rows(named=True):
-        original_img = row["image_preprocessed"]
-        augmented_rows.append(row)  # Keep original
+    for _row in df_cleaned_pil_preprocessed.iter_rows(named=True):
+        original_img = _row["image_preprocessed"]  # Get the image from the row
+        # Add is_augmented=False for original row
+        original_row = _row.copy()
+        original_row["is_augmented"] = False
+        augmented_rows.append(original_row)  # Keep original
 
         for aug_img, control_swaps in augment_image(original_img):
-            new_row = row.copy()
+            new_row = _row.copy()
             new_row["image_preprocessed"] = aug_img
+            new_row["is_augmented"] = True  # Mark augmented images as True
             for old, new in control_swaps.items():
-                new_row[new] = row[old]
-                new_row[old] = row[new]
+                new_row[new] = _row[old]
+                new_row[old] = _row[new]
             augmented_rows.append(new_row)
 
     df_augmented = pl.DataFrame(augmented_rows)
@@ -458,42 +466,42 @@ def _(mo):
 
 @app.cell
 def _(df_augmented_array_image, train_test_split):
-    df_train, df_test = train_test_split(
+    cnn_df_train, cnn_df_test = train_test_split(
         df_augmented_array_image, test_size=0.2, random_state=42
     )
 
     # --- 2. Prepare feature and label columns
-    feature_cols = "2d_array_image_preprocessed"
+    cnn_feature_cols = "2d_array_image_preprocessed"
 
     # --- 3. Create X (inputs) as Polars DataFrames
-    X_train = df_train.select(feature_cols)
-    X_test = df_test.select(feature_cols)
+    cnn_X_train = cnn_df_train.select(cnn_feature_cols)
+    cnn_X_test = cnn_df_test.select(cnn_feature_cols)
 
-    y_train = df_train.select("forward", "back", "left", "right")
+    cnn_y_train = cnn_df_train.select("forward", "back", "left", "right")
 
-    y_test = df_test.select("forward", "back", "left", "right")
-    return X_test, X_train, y_test, y_train
+    cnn_y_test = cnn_df_test.select("forward", "back", "left", "right")
+    return cnn_X_test, cnn_X_train, cnn_y_test, cnn_y_train
 
 
 @app.cell
-def _(X_train):
-    X_train.head()
+def _(cnn_X_train):
+    cnn_X_train.head()
     return
 
 
 @app.cell
-def _(X_train):
-    X_train["2d_array_image_preprocessed"][0].shape
+def _(cnn_X_train):
+    cnn_X_train["2d_array_image_preprocessed"][0].shape
     return
 
 
 @app.cell
-def _(y_train):
-    y_train.head()
+def _(cnn_y_train):
+    cnn_y_train.head()
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
     class FlexibleCNN(nn.Module):
         def __init__(
@@ -1594,14 +1602,12 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
         print(f"Detailed: {result}")
 
         return result
-    return (FlexibleCNN,)
+    return FlexibleCNN, train_model
 
 
 @app.cell
-def _(np, torch):
-    from torch.utils.data import Dataset, DataLoader
-
-    class ImageDataset(Dataset):
+def _(Dataset, np, torch):
+    class CnnImageDataset(Dataset):
         def __init__(self, images_df, labels_df):
             """
             images_df: Polars DataFrame with image arrays
@@ -1621,44 +1627,53 @@ def _(np, torch):
             # Handle image dimensions
             if len(image.shape) == 2:  # (H, W) - Grayscale
                 image = np.expand_dims(image, axis=0)  # -> (1, H, W)
+            else:
+                Exception("The image isn't gray scale")
 
             # Convert to tensor and normalize
             image = torch.FloatTensor(image) / 255.0
             label = torch.FloatTensor(label)  # Keep as one-hot vector for multi-label
 
             return image, label
-    return DataLoader, ImageDataset
+    return (CnnImageDataset,)
 
 
 @app.cell
-def _(DataLoader, ImageDataset, X_test, X_train, y_test, y_train):
+def _(
+    CnnImageDataset,
+    DataLoader,
+    cnn_X_test,
+    cnn_X_train,
+    cnn_y_test,
+    cnn_y_train,
+):
     # Create datasets and data loaders
-    train_dataset = ImageDataset(X_train, y_train)
-    test_dataset = ImageDataset(X_test, y_test)
+    cnn_train_dataset = CnnImageDataset(cnn_X_train, cnn_y_train)
+    cnn_test_dataset = CnnImageDataset(cnn_X_test, cnn_y_test)
 
-    train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
-    test_loader = DataLoader(test_dataset, batch_size=32, shuffle=False)
+    cnn_train_loader = DataLoader(cnn_train_dataset, batch_size=32, shuffle=True)
+    cnn_test_loader = DataLoader(cnn_test_dataset, batch_size=32, shuffle=False)
     return
 
 
 @app.cell
-def _(X_train):
-    sample_image = X_train[X_train.columns[0]].to_list()[0]
+def _(cnn_X_train):
+    sample_image = cnn_X_train[cnn_X_train.columns[0]].to_list()[0]
     print(f"Actual image shape: {sample_image.shape}")
-
-    # Now create the model with the correct dimensions
-    # If your images are (H, W), use those dimensions
-    input_height, input_width = sample_image.shape[:2]  # For (H, W) or (H, W, C)
-    return input_height, input_width
+    return
 
 
 @app.cell
-def _(FlexibleCNN, input_height, input_width, load_dotenv, mlflow, os):
-
+def _(load_dotenv, os):
     load_dotenv()
     cnn_experiment_name = os.getenv("MLFLOW_CNN_EXPERIMENT_NAME", "default_cnn_experiment")
+    return
 
-    architectures = [
+
+@app.cell(disabled=True)
+def _(FlexibleCNN, images_height, images_width, mlflow, os):
+
+    cnn_architectures = [
         (
             "simple_cnn",
             [
@@ -1686,35 +1701,35 @@ def _(FlexibleCNN, input_height, input_width, load_dotenv, mlflow, os):
         ),
     ]
 
-    model = FlexibleCNN(
-        architectures[0],
+    cnn_model = FlexibleCNN(
+        cnn_architectures[0],
         input_channels=1,
-        input_height=input_height,
-        input_width=input_width,
+        input_height=images_height,
+        input_width=images_width,
     )
 
     print(
-        f"Model '{model.arch_name}' created with {model.input_channels} input channel(s) and MLflow integration."
+        f"Model '{cnn_model.arch_name}' created with {cnn_model.input_channels} input channel(s) and MLflow integration."
     )
     # Use a local path relative to your script's directory
-    local_mlruns_path = os.path.abspath("./mlruns")
-    mlflow.set_tracking_uri(f"file://{local_mlruns_path}")
+    _local_mlruns_path = os.path.abspath("./mlruns")
+    mlflow.set_tracking_uri(f"file://{_local_mlruns_path}")
 
     # Ensure the directory exists and is writable
-    os.makedirs(local_mlruns_path, exist_ok=True)
-    assert os.access(local_mlruns_path, os.W_OK), (
-        f"MLflow directory '{local_mlruns_path}' not writable!"
+    os.makedirs(_local_mlruns_path, exist_ok=True)
+    assert os.access(_local_mlruns_path, os.W_OK), (
+        f"MLflow directory '{_local_mlruns_path}' not writable!"
     )
 
     print(f"MLflow tracking URI: {mlflow.get_tracking_uri()}")
 
-    weights = [1.5, 1.0, 2.0, 2.0] # Forward / Back / Left / Right
+    cnn_weights = [1.5, 1.0, 2.0, 2.0] # Forward / Back / Left / Right
     """
 
     train_model(
-        model,
-        train_loader,
-        test_loader,
+        cnn_model,
+        cnn_train_loader,
+        cnn_test_loader,
         epochs=20,
         learning_rate=0.001,
         experiment_name=cnn_experiment_name,
@@ -1722,6 +1737,360 @@ def _(FlexibleCNN, input_height, input_width, load_dotenv, mlflow, os):
         weights=weights
     )
     """
+    return
+
+
+@app.cell
+def _(mo):
+    mo.md(r"""### Temporal CNN""")
+    return
+
+
+@app.cell
+def _():
+    num_previous_frames = 5
+    return (num_previous_frames,)
+
+
+@app.cell
+def _(pl):
+    def create_df_previous_frames(df_augmented, num_previous_frames):
+        # Sort by record and frame_idx to ensure proper ordering
+        df_sorted = df_augmented.sort(["record", "frame_idx"])
+    
+        # Create the DataFrame that will hold the results
+        result_rows = []
+    
+        for record in df_sorted["record"].unique():
+            # Separate augmented and non-augmented frames
+            df_record_augmented = df_sorted.filter(
+                (pl.col("record") == record) & (pl.col("is_augmented") == True)
+            ).sort("frame_idx")
+            df_record_original = df_sorted.filter(
+                (pl.col("record") == record) & (pl.col("is_augmented") == False)
+            ).sort("frame_idx")
+        
+            # Process augmented frames (skip first num_previous_frames)
+            for i in range(len(df_record_augmented)):
+                # Skip the first num_previous_frames since they can't have all previous frames
+                if i < num_previous_frames:
+                    continue
+                
+                current_row = df_record_augmented.row(i, named=True)
+            
+                new_row = current_row.copy()
+            
+                for prev_frame in range(1, num_previous_frames + 1):
+                    prev_idx = i - prev_frame
+                    prev_row = df_record_augmented.row(prev_idx, named=True)
+                
+                    # Add only the image and control columns from the previous augmented frame
+                    new_row[f"image_preprocessed_prev_{prev_frame}"] = prev_row["image_preprocessed"]
+                    new_row[f"forward_prev_{prev_frame}"] = prev_row["forward"]
+                    new_row[f"back_prev_{prev_frame}"] = prev_row["back"]
+                    new_row[f"left_prev_{prev_frame}"] = prev_row["left"]
+                    new_row[f"right_prev_{prev_frame}"] = prev_row["right"]
+            
+                result_rows.append(new_row)
+        
+            # Process original (non-augmented) frames (skip first num_previous_frames)
+            for i in range(len(df_record_original)):
+                # Skip the first num_previous_frames since they can't have all previous frames
+                if i < num_previous_frames:
+                    continue
+                
+                current_row = df_record_original.row(i, named=True)
+            
+                new_row = current_row.copy()
+            
+                for prev_frame in range(1, num_previous_frames + 1):
+                    prev_idx = i - prev_frame
+                    prev_row = df_record_original.row(prev_idx, named=True)
+                
+                    # Add only the image and control columns from the previous original frame
+                    new_row[f"image_preprocessed_prev_{prev_frame}"] = prev_row["image_preprocessed"]
+                    new_row[f"forward_prev_{prev_frame}"] = prev_row["forward"]
+                    new_row[f"back_prev_{prev_frame}"] = prev_row["back"]
+                    new_row[f"left_prev_{prev_frame}"] = prev_row["left"]
+                    new_row[f"right_prev_{prev_frame}"] = prev_row["right"]
+            
+                result_rows.append(new_row)
+    
+        # Create final DataFrame and sort
+        df_result = pl.DataFrame(result_rows)
+        return df_result.sort(["record", "frame_idx", "is_augmented"])
+    return (create_df_previous_frames,)
+
+
+@app.cell
+def _(create_df_previous_frames, df_augmented, num_previous_frames):
+    df_previous_frames = create_df_previous_frames(df_augmented, num_previous_frames)
+    df_previous_frames.head()
+    return (df_previous_frames,)
+
+
+@app.cell
+def _(df_previous_frames, np, num_previous_frames, pl):
+    # Get all image columns that need to be converted
+    image_columns = ["image_preprocessed"] + [
+        f"image_preprocessed_prev_{i}" 
+        for i in range(1, num_previous_frames + 1)
+    ]
+
+    # Convert all image columns to numpy arrays
+    df_previous_frames_array_image = df_previous_frames.with_columns([
+        pl.col(col)
+        .map_elements(
+            lambda pil_img: np.array(pil_img) if pil_img is not None else None,
+            return_dtype=pl.Object,
+        )
+        .alias(f"2d_array_{col}")
+        for col in image_columns
+    ])
+    return (df_previous_frames_array_image,)
+
+
+@app.cell
+def _(df_previous_frames_array_image):
+    df_previous_frames_array_image.head()
+    return
+
+
+@app.cell
+def _(df_previous_frames_array_image, np, num_previous_frames, pl):
+    def stack_images(row_dict, num_prev_frames):
+        """Stack images along the channel dimension"""
+        images = []
+    
+        # Add previous frames in reverse order (prev_n, ..., prev_1) then current
+        for i in range(num_prev_frames, 0, -1):
+            img = row_dict.get(f"2d_array_image_preprocessed_prev_{i}")
+            if img is not None:
+                images.append(img)
+    
+        # Add current frame
+        current_img = row_dict.get("2d_array_image_preprocessed")
+        if current_img is not None:
+            images.append(current_img)
+    
+        if not images:
+            return None
+    
+        # Stack along channel dimension (last axis)
+        # Assuming images are 2D (grayscale) or 3D (H, W, C)
+        try:
+            stacked = np.stack(images, axis=-1)
+            return stacked
+        except ValueError as e:
+            print(f"Error stacking images: {e}")
+            print(f"Number of images to stack: {len(images)}")
+            for i, img in enumerate(images):
+                print(f"Image {i} shape: {img.shape if img is not None else 'None'}")
+            return None
+
+    # Now create the stacked arrays by iterating through rows
+    stacked_arrays = []
+    for _row in df_previous_frames_array_image.iter_rows(named=True):
+        stacked = stack_images(_row, num_previous_frames)
+        stacked_arrays.append(stacked)
+
+    # Add the stacked column to the DataFrame
+    df_previous_frames_array_stacked = df_previous_frames_array_image.with_columns(
+        pl.Series("stacked_array_image_sequence", stacked_arrays, dtype=pl.Object)
+    )
+    return (df_previous_frames_array_stacked,)
+
+
+@app.cell
+def _(df_previous_frames_array_stacked):
+    df_previous_frames_array_stacked["stacked_array_image_sequence"][0].shape
+    return
+
+
+@app.cell
+def _(df_previous_frames_array_stacked):
+    df_previous_frames_array_stacked.head()
+    return
+
+
+@app.cell
+def _(df_previous_frames_array_stacked, train_test_split):
+    temporal_cnn_df_train, temporal_cnn_df_test = train_test_split(
+        df_previous_frames_array_stacked, test_size=0.2, random_state=42
+    )
+
+    # --- 2. Prepare feature and label columns
+    temporal_cnn_feature_col = "stacked_array_image_sequence"
+
+    # --- 3. Create X (inputs) as Polars DataFrames
+    temporal_cnn_X_train = temporal_cnn_df_train.select(temporal_cnn_feature_col)
+    temporal_cnn_X_test = temporal_cnn_df_test.select(temporal_cnn_feature_col)
+
+    temporal_cnn_y_train = temporal_cnn_df_train.select("forward", "back", "left", "right")
+
+    temporal_cnn_y_test = temporal_cnn_df_test.select("forward", "back", "left", "right")
+    return (
+        temporal_cnn_X_test,
+        temporal_cnn_X_train,
+        temporal_cnn_y_test,
+        temporal_cnn_y_train,
+    )
+
+
+@app.cell
+def _(temporal_cnn_X_test):
+    temporal_cnn_X_test.head()
+    return
+
+
+@app.cell
+def _(temporal_cnn_y_test):
+    temporal_cnn_y_test.head()
+    return
+
+
+@app.cell
+def _(temporal_cnn_X_train):
+    temporal_sample_image = temporal_cnn_X_train[temporal_cnn_X_train.columns[0]].to_list()[0]
+    print(f"Actual image shape: {temporal_sample_image.shape}")
+    return
+
+
+@app.cell
+def _(Dataset, np, torch):
+    class TemporalCnnImageDataset(Dataset):
+        def __init__(self, images_df, labels_df):
+            """
+            images_df: Polars DataFrame with stacked image arrays in 'stacked_array_image_sequence' column
+            labels_df: Polars DataFrame with one-hot encoded labels (multi-label format)
+            """
+            self.images = images_df['stacked_array_image_sequence'].to_list()
+            # Keep one-hot encoded labels for multi-label classification
+            self.labels = labels_df.to_numpy().astype(np.float32)  # Convert to float32
+
+        def __len__(self):
+            return len(self.images)
+
+        def __getitem__(self, idx):
+            image = self.images[idx]
+            label = self.labels[idx]  # This is already one-hot encoded
+
+            # Handle image dimensions
+            if len(image.shape) == 3:  # (H, W, C) - Stacked sequence
+                # Transpose from (H, W, C) to (C, H, W) for PyTorch
+                image = np.transpose(image, (2, 0, 1))
+            else:
+                raise Exception(f"Expected 3D image (H, W, C), got shape: {image.shape}")
+
+            # Convert to tensor and normalize
+            image = torch.FloatTensor(image) / 255.0
+            label = torch.FloatTensor(label)  # Keep as one-hot vector for multi-label
+
+            return image, label
+    return (TemporalCnnImageDataset,)
+
+
+@app.cell
+def _(
+    DataLoader,
+    TemporalCnnImageDataset,
+    temporal_cnn_X_test,
+    temporal_cnn_X_train,
+    temporal_cnn_y_test,
+    temporal_cnn_y_train,
+):
+    # Create datasets and data loaders
+    temporal_cnn_train_dataset = TemporalCnnImageDataset(temporal_cnn_X_train, temporal_cnn_y_train)
+    temporal_cnn_test_dataset = TemporalCnnImageDataset(temporal_cnn_X_test, temporal_cnn_y_test)
+
+    temporal_cnn_train_loader = DataLoader(temporal_cnn_train_dataset, batch_size=32, shuffle=True)
+    temporal_cnn_test_loader = DataLoader(temporal_cnn_test_dataset, batch_size=32, shuffle=False)
+    return temporal_cnn_test_loader, temporal_cnn_train_loader
+
+
+@app.cell
+def _(load_dotenv, os):
+    load_dotenv()
+    temporal_cnn_experiment_name = os.getenv("MLFLOW_TEMPORAL_CNN_EXPERIMENT_NAME", "default_cnn_experiment")
+    return (temporal_cnn_experiment_name,)
+
+
+@app.cell
+def _(
+    FlexibleCNN,
+    images_height,
+    images_width,
+    mlflow,
+    num_previous_frames,
+    os,
+    temporal_cnn_experiment_name,
+    temporal_cnn_test_loader,
+    temporal_cnn_train_loader,
+    train_model,
+):
+    lstm_architectures = [
+        (
+            "simple_cnn",
+            [
+                # Feature extraction
+                (
+                    "conv",
+                    {"out_channels": 32, "kernel_size": 3, "stride": 1, "padding": 1},
+                ),
+                ("relu", {}),
+                ("maxpool", {"kernel_size": 2, "stride": 2}),
+                ("dropout", {"p": 0.2}),
+                (
+                    "conv",
+                    {"out_channels": 32, "kernel_size": 3, "stride": 1, "padding": 1},
+                ),
+                ("relu", {}),
+                ("maxpool", {"kernel_size": 2, "stride": 2}),
+                ("dropout", {"p": 0.2}),
+                # Classifier
+                ("linear", {"out_features": 16}),
+                ("relu", {}),
+                ("dropout", {"p": 0.2}),
+                ("linear", {"out_features": 4}),
+            ],
+        ),
+    ]
+
+    temporal_cnn_model = FlexibleCNN(
+        lstm_architectures[0],
+        input_channels=num_previous_frames + 1,
+        input_height=images_height,
+        input_width=images_width,
+    )
+
+    print(
+        f"Model '{temporal_cnn_model.arch_name}' created with {temporal_cnn_model.input_channels} input channel(s) and MLflow integration."
+    )
+    # Use a local path relative to your script's directory
+    _local_mlruns_path = os.path.abspath("./mlruns")
+    mlflow.set_tracking_uri(f"file://{_local_mlruns_path}")
+
+    # Ensure the directory exists and is writable
+    os.makedirs(_local_mlruns_path, exist_ok=True)
+    assert os.access(_local_mlruns_path, os.W_OK), (
+        f"MLflow directory '{_local_mlruns_path}' not writable!"
+    )
+
+    print(f"MLflow tracking URI: {mlflow.get_tracking_uri()}")
+
+    temporal_cnn_weights = [1.5, 1.0, 2.0, 2.0] # Forward / Back / Left / Right
+
+    train_model(
+        temporal_cnn_model,
+        temporal_cnn_train_loader,
+        temporal_cnn_test_loader,
+        epochs=20,
+        learning_rate=0.001,
+        experiment_name=temporal_cnn_experiment_name,
+        run_name="simple_conv_32_20_epochs_secret_strat_with_weights",
+        weights=temporal_cnn_weights
+    )
+
     return
 
 
