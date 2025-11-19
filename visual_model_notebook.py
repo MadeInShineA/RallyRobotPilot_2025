@@ -32,6 +32,7 @@ def _():
     from sklearn.metrics import classification_report, confusion_matrix, roc_curve, auc
     import tempfile
     from torch.utils.data import Dataset, DataLoader
+
     return (
         DataLoader,
         Dataset,
@@ -151,7 +152,9 @@ def _(df):
 
 @app.cell
 def _(mo):
-    mo.md(r"""### Clean the first frames of each record when nothing happens (all inputs are 0)""")
+    mo.md(
+        r"""### Clean the first frames of each record when nothing happens (all inputs are 0)"""
+    )
     return
 
 
@@ -232,12 +235,13 @@ def _(Image):
             size, Image.Resampling.LANCZOS
         )  # Resize to exact dimensions
         return image
+
     return (preprocess_image,)
 
 
 @app.cell
 def _(df_cleaned, pl, preprocess_image):
-    images_dimensions = (90, 160)
+    images_dimensions = (40, 66)
     images_width, images_height = images_dimensions
 
     df_cleaned_pil_preprocessed = df_cleaned.with_columns(
@@ -295,6 +299,7 @@ def _(pl, sns):
             hue="control",
             palette=["green", "red", "blue", "orange"],
         )
+
     return (plot_controls,)
 
 
@@ -367,6 +372,7 @@ def _(pl, plt, sns):
 
         plt.tight_layout()
         return ax
+
     return (plot_usage,)
 
 
@@ -909,13 +915,19 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             pred_score = pred_scores[i]
 
             # Sub-grid: image + bar plot
-            sub_gs = gridspec.GridSpecFromSubplotSpec(2, 1, gs[i], height_ratios=[2, 1], hspace=0.3)
+            sub_gs = gridspec.GridSpecFromSubplotSpec(
+                2, 1, gs[i], height_ratios=[2, 1], hspace=0.3
+            )
 
             # Image subplot
             ax_img = fig.add_subplot(sub_gs[0])
             ax_img.imshow(img, cmap="gray")
-            true_actions = [class_names[j] for j, val in enumerate(true_label) if val > 0] or ["none"]
-            pred_actions = [class_names[j] for j, val in enumerate(pred_label) if val > 0] or ["none"]
+            true_actions = [
+                class_names[j] for j, val in enumerate(true_label) if val > 0
+            ] or ["none"]
+            pred_actions = [
+                class_names[j] for j, val in enumerate(pred_label) if val > 0
+            ] or ["none"]
             title = f"True: {', '.join(true_actions)} | Pred: {', '.join(pred_actions)}"
             ax_img.set_title(title, fontsize=10, color="red")  # Red to highlight error
             ax_img.axis("off")
@@ -926,7 +938,7 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
                 class_names,
                 pred_score,
                 color=["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"],
-                alpha=0.7
+                alpha=0.7,
             )
             ax_bar.set_ylim(0, 1)
             ax_bar.set_ylabel("Prob", fontsize=8)
@@ -940,7 +952,9 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
                     bar.get_x() + bar.get_width() / 2.0,
                     bar.get_height() + 0.02,
                     f"{score:.2f}",
-                    ha="center", va="bottom", fontsize=7
+                    ha="center",
+                    va="bottom",
+                    fontsize=7,
                 )
 
         plt.tight_layout()
@@ -991,7 +1005,7 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
         learning_rate=0.001,
         experiment_name="cnn_experiment",
         run_name=None,
-        weights=None
+        weights=None,
     ):
         """
         Enhanced training with comprehensive MLflow logging and graphics including weighted F1-score
@@ -1039,13 +1053,17 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
             if weights is not None:
-                if len(weights) != 4: # Assuming 4 classes
-                    raise ValueError(f"Expected 4 weights for 4 classes, got {len(weights)}")
+                if len(weights) != 4:  # Assuming 4 classes
+                    raise ValueError(
+                        f"Expected 4 weights for 4 classes, got {len(weights)}"
+                    )
                 # Convert weights to tensor
                 pos_weights = torch.tensor(weights, dtype=torch.float32)
                 # Create the loss function with pos_weight
                 criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weights)
-                print(f"Using weighted BCEWithLogitsLoss with pos_weights: {pos_weights}")
+                print(
+                    f"Using weighted BCEWithLogitsLoss with pos_weights: {pos_weights}"
+                )
             else:
                 # Default behavior if no weights provided
                 criterion = nn.BCEWithLogitsLoss()
@@ -1382,7 +1400,9 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             plt.close(roc_fig)
 
             # Create and log prediction examples
-            pred_examples_fig = plot_wrong_prediction_examples(model, val_loader, class_names)
+            pred_examples_fig = plot_wrong_prediction_examples(
+                model, val_loader, class_names
+            )
             tmp_pred_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
             pred_examples_fig.savefig(tmp_pred_file.name, dpi=150, bbox_inches="tight")
             tmp_pred_file.close()  # Close the file handle
@@ -1439,7 +1459,7 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
                 "arch_name": model.arch_name,
                 "input_channels": model.input_channels,
                 "input_height": 160,  # You might want to store these as class attributes
-                "input_width": 90,    # You might want to store these as class attributes
+                "input_width": 90,  # You might want to store these as class attributes
                 "feature_output_size": model.feature_output_size,
                 "layers_config": model.layers_config,
                 "total_params": total_params,
@@ -1447,12 +1467,13 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             }
 
             # Save architecture config as JSON
-            tmp_arch_file = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+            tmp_arch_file = tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", delete=False
+            )
             json.dump(architecture_config, tmp_arch_file, indent=2)
             tmp_arch_file.close()
             mlflow.log_artifact(tmp_arch_file.name, "model_architecture.json")
             os.unlink(tmp_arch_file.name)
-
 
             # Log model with input example and include architecture info
             sample_batch, _ = next(iter(train_loader))
@@ -1483,7 +1504,6 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             )
 
             return model
-
 
     def evaluate_model(model, test_loader):
         """
@@ -1602,6 +1622,7 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
         print(f"Detailed: {result}")
 
         return result
+
     return FlexibleCNN, train_model
 
 
@@ -1635,6 +1656,7 @@ def _(Dataset, np, torch):
             label = torch.FloatTensor(label)  # Keep as one-hot vector for multi-label
 
             return image, label
+
     return (CnnImageDataset,)
 
 
@@ -1666,7 +1688,9 @@ def _(cnn_X_train):
 @app.cell
 def _(load_dotenv, os):
     load_dotenv()
-    cnn_experiment_name = os.getenv("MLFLOW_CNN_EXPERIMENT_NAME", "default_cnn_experiment")
+    cnn_experiment_name = os.getenv(
+        "MLFLOW_CNN_EXPERIMENT_NAME", "default_cnn_experiment"
+    )
     return (cnn_experiment_name,)
 
 
@@ -1682,7 +1706,6 @@ def _(
     os,
     train_model,
 ):
-
     cnn_architectures = [
         (
             "simple_cnn",
@@ -1780,8 +1803,9 @@ def _(
 
     print(f"MLflow tracking URI: {mlflow.get_tracking_uri()}")
 
-    cnn_weights = [1.5, 1.0, 2.0, 2.0] # Forward / Back / Left / Right
+    cnn_weights = [1.5, 1.0, 2.0, 2.0]  # Forward / Back / Left / Right
 
+    """
     train_model(
         cnn_model,
         cnn_train_loader,
@@ -1793,6 +1817,7 @@ def _(
         weights=cnn_weights
     )
 
+    """
     return
 
 
@@ -1835,11 +1860,15 @@ def _(pl):
 
                 for prev_frame in range(1, num_previous_frames + 1):
                     prev_frame_idx = current_frame - prev_frame
-                    prev_rows = df_record_augmented.filter(pl.col("frame_idx") == prev_frame_idx)
+                    prev_rows = df_record_augmented.filter(
+                        pl.col("frame_idx") == prev_frame_idx
+                    )
                     if len(prev_rows) > 0:
                         prev_row = prev_rows.row(0, named=True)
                         # Add only the image and control columns from the previous augmented frame
-                        new_row[f"image_preprocessed_prev_{prev_frame}"] = prev_row["image_preprocessed"]
+                        new_row[f"image_preprocessed_prev_{prev_frame}"] = prev_row[
+                            "image_preprocessed"
+                        ]
                         new_row[f"forward_prev_{prev_frame}"] = prev_row["forward"]
                         new_row[f"back_prev_{prev_frame}"] = prev_row["back"]
                         new_row[f"left_prev_{prev_frame}"] = prev_row["left"]
@@ -1858,11 +1887,15 @@ def _(pl):
 
                 for prev_frame in range(1, num_previous_frames + 1):
                     prev_frame_idx = current_frame - prev_frame
-                    prev_rows = df_record_original.filter(pl.col("frame_idx") == prev_frame_idx)
+                    prev_rows = df_record_original.filter(
+                        pl.col("frame_idx") == prev_frame_idx
+                    )
                     if len(prev_rows) > 0:
                         prev_row = prev_rows.row(0, named=True)
                         # Add only the image and control columns from the previous original frame
-                        new_row[f"image_preprocessed_prev_{prev_frame}"] = prev_row["image_preprocessed"]
+                        new_row[f"image_preprocessed_prev_{prev_frame}"] = prev_row[
+                            "image_preprocessed"
+                        ]
                         new_row[f"forward_prev_{prev_frame}"] = prev_row["forward"]
                         new_row[f"back_prev_{prev_frame}"] = prev_row["back"]
                         new_row[f"left_prev_{prev_frame}"] = prev_row["left"]
@@ -1875,6 +1908,7 @@ def _(pl):
         # Create final DataFrame and sort
         df_result = pl.DataFrame(result_rows)
         return df_result.sort(["record", "frame_idx", "is_augmented"])
+
     return (create_df_previous_frames,)
 
 
@@ -1889,20 +1923,21 @@ def _(create_df_previous_frames, df_augmented, num_previous_frames):
 def _(df_previous_frames, np, num_previous_frames, pl):
     # Get all image columns that need to be converted
     image_columns = ["image_preprocessed"] + [
-        f"image_preprocessed_prev_{i}" 
-        for i in range(1, num_previous_frames + 1)
+        f"image_preprocessed_prev_{i}" for i in range(1, num_previous_frames + 1)
     ]
 
     # Convert all image columns to numpy arrays
-    df_previous_frames_array_image = df_previous_frames.with_columns([
-        pl.col(col)
-        .map_elements(
-            lambda pil_img: np.array(pil_img) if pil_img is not None else None,
-            return_dtype=pl.Object,
-        )
-        .alias(f"2d_array_{col}")
-        for col in image_columns
-    ])
+    df_previous_frames_array_image = df_previous_frames.with_columns(
+        [
+            pl.col(col)
+            .map_elements(
+                lambda pil_img: np.array(pil_img) if pil_img is not None else None,
+                return_dtype=pl.Object,
+            )
+            .alias(f"2d_array_{col}")
+            for col in image_columns
+        ]
+    )
     return (df_previous_frames_array_image,)
 
 
@@ -1982,9 +2017,13 @@ def _(df_previous_frames_array_stacked, train_test_split):
     temporal_cnn_X_train = temporal_cnn_df_train.select(temporal_cnn_feature_col)
     temporal_cnn_X_test = temporal_cnn_df_test.select(temporal_cnn_feature_col)
 
-    temporal_cnn_y_train = temporal_cnn_df_train.select("forward", "back", "left", "right")
+    temporal_cnn_y_train = temporal_cnn_df_train.select(
+        "forward", "back", "left", "right"
+    )
 
-    temporal_cnn_y_test = temporal_cnn_df_test.select("forward", "back", "left", "right")
+    temporal_cnn_y_test = temporal_cnn_df_test.select(
+        "forward", "back", "left", "right"
+    )
     return (
         temporal_cnn_X_test,
         temporal_cnn_X_train,
@@ -2007,7 +2046,9 @@ def _(temporal_cnn_y_test):
 
 @app.cell
 def _(temporal_cnn_X_train):
-    temporal_sample_image = temporal_cnn_X_train[temporal_cnn_X_train.columns[0]].to_list()[0]
+    temporal_sample_image = temporal_cnn_X_train[
+        temporal_cnn_X_train.columns[0]
+    ].to_list()[0]
     print(f"Actual image shape: {temporal_sample_image.shape}")
     return
 
@@ -2020,7 +2061,7 @@ def _(Dataset, np, torch):
             images_df: Polars DataFrame with stacked image arrays in 'stacked_array_image_sequence' column
             labels_df: Polars DataFrame with one-hot encoded labels (multi-label format)
             """
-            self.images = images_df['stacked_array_image_sequence'].to_list()
+            self.images = images_df["stacked_array_image_sequence"].to_list()
             # Keep one-hot encoded labels for multi-label classification
             self.labels = labels_df.to_numpy().astype(np.float32)  # Convert to float32
 
@@ -2036,13 +2077,16 @@ def _(Dataset, np, torch):
                 # Transpose from (H, W, C) to (C, H, W) for PyTorch
                 image = np.transpose(image, (2, 0, 1))
             else:
-                raise Exception(f"Expected 3D image (H, W, C), got shape: {image.shape}")
+                raise Exception(
+                    f"Expected 3D image (H, W, C), got shape: {image.shape}"
+                )
 
             # Convert to tensor and normalize
             image = torch.FloatTensor(image) / 255.0
             label = torch.FloatTensor(label)  # Keep as one-hot vector for multi-label
 
             return image, label
+
     return (TemporalCnnImageDataset,)
 
 
@@ -2056,18 +2100,28 @@ def _(
     temporal_cnn_y_train,
 ):
     # Create datasets and data loaders
-    temporal_cnn_train_dataset = TemporalCnnImageDataset(temporal_cnn_X_train, temporal_cnn_y_train)
-    temporal_cnn_test_dataset = TemporalCnnImageDataset(temporal_cnn_X_test, temporal_cnn_y_test)
+    temporal_cnn_train_dataset = TemporalCnnImageDataset(
+        temporal_cnn_X_train, temporal_cnn_y_train
+    )
+    temporal_cnn_test_dataset = TemporalCnnImageDataset(
+        temporal_cnn_X_test, temporal_cnn_y_test
+    )
 
-    temporal_cnn_train_loader = DataLoader(temporal_cnn_train_dataset, batch_size=32, shuffle=True)
-    temporal_cnn_test_loader = DataLoader(temporal_cnn_test_dataset, batch_size=32, shuffle=False)
+    temporal_cnn_train_loader = DataLoader(
+        temporal_cnn_train_dataset, batch_size=32, shuffle=True
+    )
+    temporal_cnn_test_loader = DataLoader(
+        temporal_cnn_test_dataset, batch_size=32, shuffle=False
+    )
     return
 
 
 @app.cell
 def _(load_dotenv, os):
     load_dotenv()
-    temporal_cnn_experiment_name = os.getenv("MLFLOW_TEMPORAL_CNN_EXPERIMENT_NAME", "default_cnn_experiment")
+    temporal_cnn_experiment_name = os.getenv(
+        "MLFLOW_TEMPORAL_CNN_EXPERIMENT_NAME", "default_cnn_experiment"
+    )
     return
 
 
@@ -2158,7 +2212,7 @@ def _(
 
     print(f"MLflow tracking URI: {mlflow.get_tracking_uri()}")
 
-    temporal_cnn_weights = [1.5, 1.0, 2.0, 2.0] # Forward / Back / Left / Right
+    temporal_cnn_weights = [1.5, 1.0, 2.0, 2.0]  # Forward / Back / Left / Right
 
     """
     train_model(
