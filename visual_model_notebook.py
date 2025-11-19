@@ -29,7 +29,13 @@ def _():
     import torch.nn as nn
     import mlflow
     import mlflow.pytorch
-    from sklearn.metrics import classification_report, confusion_matrix, roc_curve, auc, accuracy_score
+    from sklearn.metrics import (
+        classification_report,
+        confusion_matrix,
+        roc_curve,
+        auc,
+        accuracy_score,
+    )
     import tempfile
     from torch.utils.data import Dataset, DataLoader
     import matplotlib.gridspec as gridspec
@@ -157,7 +163,9 @@ def _(df):
 
 @app.cell
 def _(mo):
-    mo.md(r"""### Clean the first frames of each record when nothing happens (all inputs are 0)""")
+    mo.md(
+        r"""### Clean the first frames of each record when nothing happens (all inputs are 0)"""
+    )
     return
 
 
@@ -238,6 +246,7 @@ def _(Image):
             size, Image.Resampling.LANCZOS
         )  # Resize to exact dimensions
         return image
+
     return (preprocess_image,)
 
 
@@ -261,7 +270,7 @@ app._unparsable_cell(
     r"""
         df_cleaned_pil_preprocessed.head()
     """,
-    name="_"
+    name="_",
 )
 
 
@@ -303,6 +312,7 @@ def _(pl, sns):
             hue="control",
             palette=["green", "red", "blue", "orange"],
         )
+
     return (plot_controls,)
 
 
@@ -375,6 +385,7 @@ def _(pl, plt, sns):
 
         plt.tight_layout()
         return ax
+
     return (plot_usage,)
 
 
@@ -530,9 +541,9 @@ def _(
     torch,
 ):
     class FlexibleCNN(nn.Module):
-    def __init__(
-        self, arch_config, input_channels=1, input_height=112, input_width=80
-    ):
+        def __init__(
+            self, arch_config, input_channels=1, input_height=112, input_width=80
+        ):
             super(FlexibleCNN, self).__init__()
             name, layers = arch_config
             self.arch_name = name
@@ -660,7 +671,6 @@ def _(
             zero_col = np.zeros((y.shape[0], 1), dtype=y.dtype)
             return np.concatenate([y, zero_col], axis=1)
 
-
     def create_training_plots(
         train_losses,
         val_losses,
@@ -697,7 +707,7 @@ def _(
         # Use a color map or list that can handle the number of classes
         # Adjust color list if necessary, or use a colormap
         num_classes = len(class_names)
-        colors = plt.cm.get_cmap('tab10', num_classes)(range(num_classes))
+        colors = plt.cm.get_cmap("tab10", num_classes)(range(num_classes))
         # If you have a specific color list, ensure it's long enough
         # colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"] # Example for 5 classes
 
@@ -727,7 +737,6 @@ def _(
 
         plt.tight_layout()
         return fig
-
 
     def create_f1_per_class_plot(
         train_f1_per_class, val_f1_per_class, epoch, class_names
@@ -777,7 +786,6 @@ def _(
         plt.tight_layout()
         return fig
 
-
     def plot_confusion_matrices(y_true, y_pred, class_names):
         """Create confusion matrices for each class (multi-label) - Updated for N classes"""
         num_classes = len(class_names)
@@ -814,7 +822,6 @@ def _(
         plt.tight_layout()
         return fig
 
-
     def plot_roc_curves(y_true, y_scores, class_names):
         """Create ROC curves for each class"""
         fig, ax = plt.subplots(figsize=(10, 8))
@@ -830,7 +837,6 @@ def _(
         ax.legend()
         ax.grid(True)
         return fig
-
 
     def plot_prediction_examples(model, test_loader, class_names, num_examples=4):
         """Visualize prediction examples with bar plots under images - Updated for N classes"""
@@ -867,20 +873,27 @@ def _(
             # For now, we calculate 'nothing' only for labels/preds for metrics.
             # Let's just pass the original scores to the bar plot for the original classes.
             # We need to adjust the plotting loop to handle the score array correctly.
-            scores_for_plot = pred_scores_np # Use original scores for plotting
-            if scores_for_plot.shape[1] < len(class_names): # If scores array is missing 'nothing'
-                 # Add a column of zeros or calculate 'nothing' score (e.g., 1 - max of others, or 1 if all others < 0.5)
-                 # For now, adding zeros is simplest if the model doesn't predict 'nothing'
-                 # Let's assume the model scores are for 4 classes, and we add a 'nothing' score column.
-                 # A simple 'nothing' score could be: prob_nothing = 1 if all original probs < 0.5 else 0
-                 # Or prob_nothing = 1 - max(original_probs)
-                 # Let's use prob_nothing = 1 - max(original_probs) for a continuous score.
-                 max_probs = np.max(pred_scores_np, axis=1, keepdims=True) # Shape (N, 1)
-                 prob_nothing = 1 - max_probs # Shape (N, 1)
-                 scores_for_plot = np.concatenate([pred_scores_np, prob_nothing], axis=1) # Shape (N, 5)
+            scores_for_plot = pred_scores_np  # Use original scores for plotting
+            if scores_for_plot.shape[1] < len(
+                class_names
+            ):  # If scores array is missing 'nothing'
+                # Add a column of zeros or calculate 'nothing' score (e.g., 1 - max of others, or 1 if all others < 0.5)
+                # For now, adding zeros is simplest if the model doesn't predict 'nothing'
+                # Let's assume the model scores are for 4 classes, and we add a 'nothing' score column.
+                # A simple 'nothing' score could be: prob_nothing = 1 if all original probs < 0.5 else 0
+                # Or prob_nothing = 1 - max(original_probs)
+                # Let's use prob_nothing = 1 - max(original_probs) for a continuous score.
+                max_probs = np.max(
+                    pred_scores_np, axis=1, keepdims=True
+                )  # Shape (N, 1)
+                prob_nothing = 1 - max_probs  # Shape (N, 1)
+                scores_for_plot = np.concatenate(
+                    [pred_scores_np, prob_nothing], axis=1
+                )  # Shape (N, 5)
         else:
-            scores_for_plot = pred_scores_np # Use original scores if 'nothing' not expected
-
+            scores_for_plot = (
+                pred_scores_np  # Use original scores if 'nothing' not expected
+            )
 
         # Create figure with custom grid for image + bar plot layout
         fig = plt.figure(figsize=(12, 10))
@@ -890,15 +903,15 @@ def _(
 
         # Use a color map or list that can handle the number of classes
         num_plot_classes = len(class_names)
-        colors = plt.cm.get_cmap('tab10', num_plot_classes)(range(num_plot_classes))
+        colors = plt.cm.get_cmap("tab10", num_plot_classes)(range(num_plot_classes))
         # If you have a specific color list, ensure it's long enough
         # colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"] # Example for 5 classes
 
         for i in range(min(num_examples, len(images))):
             img = images[i][0]  # Grayscale channel
-            true_label = true_labels_np[i] # Use potentially updated labels
-            pred_label = pred_labels_np[i] # Use potentially updated preds
-            pred_score = scores_for_plot[i] # Use potentially updated scores
+            true_label = true_labels_np[i]  # Use potentially updated labels
+            pred_label = pred_labels_np[i]  # Use potentially updated preds
+            pred_score = scores_for_plot[i]  # Use potentially updated scores
 
             # Create sub-grid for each example (image + bar plot)
             sub_gs = gridspec.GridSpecFromSubplotSpec(
@@ -916,9 +929,13 @@ def _(
                 class_names[j] for j, val in enumerate(pred_label) if val > 0
             ]
             if not true_actions:
-                true_actions = ["none"] # Or class_names[-1] if always including 'nothing'
+                true_actions = [
+                    "none"
+                ]  # Or class_names[-1] if always including 'nothing'
             if not pred_actions:
-                pred_actions = ["none"] # Or class_names[-1] if always including 'nothing'
+                pred_actions = [
+                    "none"
+                ]  # Or class_names[-1] if always including 'nothing'
             title = f"True: {', '.join(true_actions)} | Pred: {', '.join(pred_actions)}"
             ax_img.set_title(title, fontsize=10)
             ax_img.axis("off")
@@ -950,7 +967,6 @@ def _(
 
         plt.tight_layout()
         return fig
-
 
     def plot_wrong_prediction_examples(model, test_loader, class_names, num_examples=4):
         """
@@ -997,12 +1013,13 @@ def _(
             true_labels_np = add_nothing_class(true_labels_np)
             pred_labels_np = add_nothing_class(pred_labels_np)
             # Similar logic for scores as in plot_prediction_examples if needed
-            max_probs = np.max(pred_scores_np, axis=1, keepdims=True) # Shape (N, 1)
-            prob_nothing = 1 - max_probs # Shape (N, 1)
-            scores_for_plot = np.concatenate([pred_scores_np, prob_nothing], axis=1) # Shape (N, 5)
+            max_probs = np.max(pred_scores_np, axis=1, keepdims=True)  # Shape (N, 1)
+            prob_nothing = 1 - max_probs  # Shape (N, 1)
+            scores_for_plot = np.concatenate(
+                [pred_scores_np, prob_nothing], axis=1
+            )  # Shape (N, 5)
         else:
             scores_for_plot = pred_scores_np
-
 
         # Create figure
         fig = plt.figure(figsize=(12, 3 * len(images)))
@@ -1010,15 +1027,15 @@ def _(
 
         # Use a color map or list that can handle the number of classes
         num_plot_classes = len(class_names)
-        colors = plt.cm.get_cmap('tab10', num_plot_classes)(range(num_plot_classes))
+        colors = plt.cm.get_cmap("tab10", num_plot_classes)(range(num_plot_classes))
         # If you have a specific color list, ensure it's long enough
         # colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"] # Example for 5 classes
 
         for i in range(len(images)):
             img = images[i]
-            true_label = true_labels_np[i] # Use potentially updated labels
-            pred_label = pred_labels_np[i] # Use potentially updated preds
-            pred_score = scores_for_plot[i] # Use potentially updated scores
+            true_label = true_labels_np[i]  # Use potentially updated labels
+            pred_label = pred_labels_np[i]  # Use potentially updated preds
+            pred_score = scores_for_plot[i]  # Use potentially updated scores
 
             # Sub-grid: image + bar plot
             sub_gs = gridspec.GridSpecFromSubplotSpec(
@@ -1030,10 +1047,10 @@ def _(
             ax_img.imshow(img, cmap="gray")
             true_actions = [
                 class_names[j] for j, val in enumerate(true_label) if val > 0
-            ] or ["none"] # Or class_names[-1] if always including 'nothing'
+            ] or ["none"]  # Or class_names[-1] if always including 'nothing'
             pred_actions = [
                 class_names[j] for j, val in enumerate(pred_label) if val > 0
-            ] or ["none"] # Or class_names[-1] if always including 'nothing'
+            ] or ["none"]  # Or class_names[-1] if always including 'nothing'
             title = f"True: {', '.join(true_actions)} | Pred: {', '.join(pred_actions)}"
             ax_img.set_title(title, fontsize=10, color="red")  # Red to highlight error
             ax_img.axis("off")
@@ -1064,7 +1081,6 @@ def _(
 
         plt.tight_layout()
         return fig
-
 
     def create_accuracy_per_class_plot(
         train_acc_per_class, val_acc_per_class, epoch, class_names
@@ -1114,7 +1130,6 @@ def _(
         plt.tight_layout()
         return fig
 
-
     def train_model(
         model,
         train_loader,
@@ -1140,7 +1155,7 @@ def _(
             mlflow.log_param("epochs", epochs)
             mlflow.log_param("model_architecture", model.arch_name)
             mlflow.log_param("input_channels", model.input_channels)
-            mlflow.log_param("input_height", model.input_height) # Log input height
+            mlflow.log_param("input_height", model.input_height)  # Log input height
             mlflow.log_param("input_width", model.input_width)  # Log input width
             mlflow.log_param("feature_output_size", model.feature_output_size)
             mlflow.log_param("batch_size", train_loader.batch_size)
@@ -1178,8 +1193,10 @@ def _(
             train_losses, val_losses = [], []
             train_accs, val_accs = [], []
             train_f1s, val_f1s = [], []  # New: track overall F1 scores
-            num_original_classes = 4 # Assuming original classes are forward, back, left, right
-            num_total_classes = 5 # Including the 'nothing' class
+            num_original_classes = (
+                4  # Assuming original classes are forward, back, left, right
+            )
+            num_total_classes = 5  # Including the 'nothing' class
             train_f1_per_class = [
                 [] for _ in range(num_total_classes)
             ]  # Track F1 per class for training
@@ -1192,7 +1209,13 @@ def _(
             val_acc_per_class = [
                 [] for _ in range(num_total_classes)
             ]  # Track accuracy per class for validation
-            class_names = ["forward", "back", "left", "right", "nothing"] # Update class names
+            class_names = [
+                "forward",
+                "back",
+                "left",
+                "right",
+                "nothing",
+            ]  # Update class names
 
             for epoch in range(epochs):
                 # Training phase
@@ -1244,21 +1267,26 @@ def _(
                 # Per-class F1 scores (for 5 classes)
                 try:
                     train_f1_class = f1_score(
-                        train_target_all_with_nothing, train_pred_all_with_nothing, average=None, zero_division=0
+                        train_target_all_with_nothing,
+                        train_pred_all_with_nothing,
+                        average=None,
+                        zero_division=0,
                     )
-                    for i in range(num_total_classes): # Loop for 5 classes now
+                    for i in range(num_total_classes):  # Loop for 5 classes now
                         train_f1_per_class[i].append(train_f1_class[i])
                 except Exception as e:
                     print(f"Warning: Could not calculate training per-class F1: {e}")
                     # If there are no positive samples for a class, set F1 to 0
-                    for i in range(num_total_classes): # Loop for 5 classes now
+                    for i in range(num_total_classes):  # Loop for 5 classes now
                         train_f1_per_class[i].append(0.0)
 
                 # Per-class accuracy (for 5 classes)
-                for i in range(num_total_classes): # Loop for 5 classes now
+                for i in range(num_total_classes):  # Loop for 5 classes now
                     class_pred = train_pred_all_with_nothing[:, i]
                     class_target = train_target_all_with_nothing[:, i]
-                    class_acc = accuracy_score(class_target, class_pred) * 100 # Use sklearn accuracy
+                    class_acc = (
+                        accuracy_score(class_target, class_pred) * 100
+                    )  # Use sklearn accuracy
                     train_acc_per_class[i].append(class_acc)
 
                 train_acc = 100.0 * train_correct / train_total
@@ -1314,21 +1342,26 @@ def _(
                 # Per-class F1 scores (for 5 classes)
                 try:
                     val_f1_class = f1_score(
-                        val_target_all_with_nothing, val_pred_all_with_nothing, average=None, zero_division=0
+                        val_target_all_with_nothing,
+                        val_pred_all_with_nothing,
+                        average=None,
+                        zero_division=0,
                     )
-                    for i in range(num_total_classes): # Loop for 5 classes now
+                    for i in range(num_total_classes):  # Loop for 5 classes now
                         val_f1_per_class[i].append(val_f1_class[i])
                 except Exception as e:
                     print(f"Warning: Could not calculate validation per-class F1: {e}")
                     # If there are no positive samples for a class, set F1 to 0
-                    for i in range(num_total_classes): # Loop for 5 classes now
+                    for i in range(num_total_classes):  # Loop for 5 classes now
                         val_f1_per_class[i].append(0.0)
 
                 # Per-class accuracy (for 5 classes)
-                for i in range(num_total_classes): # Loop for 5 classes now
+                for i in range(num_total_classes):  # Loop for 5 classes now
                     class_pred = val_pred_all_with_nothing[:, i]
                     class_target = val_target_all_with_nothing[:, i]
-                    class_acc = accuracy_score(class_target, class_pred) * 100 # Use sklearn accuracy
+                    class_acc = (
+                        accuracy_score(class_target, class_pred) * 100
+                    )  # Use sklearn accuracy
                     val_acc_per_class[i].append(class_acc)
 
                 val_acc = 100.0 * val_correct / val_total
@@ -1341,7 +1374,7 @@ def _(
                 mlflow.log_metric("train_accuracy", train_acc, step=epoch)
                 mlflow.log_metric("train_f1_weighted", train_f1_weighted, step=epoch)
                 # Log per-class training F1 scores (updated loop)
-                for i, class_name in enumerate(class_names): # Now iterates 5 times
+                for i, class_name in enumerate(class_names):  # Now iterates 5 times
                     mlflow.log_metric(
                         f"train_f1_{class_name}", train_f1_per_class[i][-1], step=epoch
                     )
@@ -1355,7 +1388,7 @@ def _(
                 mlflow.log_metric("val_accuracy", val_acc, step=epoch)
                 mlflow.log_metric("val_f1_weighted", val_f1_weighted, step=epoch)
                 # Log per-class validation F1 scores (updated loop)
-                for i, class_name in enumerate(class_names): # Now iterates 5 times
+                for i, class_name in enumerate(class_names):  # Now iterates 5 times
                     mlflow.log_metric(
                         f"val_f1_{class_name}", val_f1_per_class[i][-1], step=epoch
                     )
@@ -1366,13 +1399,13 @@ def _(
                 # Print with per-class F1 scores and per-class accuracy (updated loops)
                 class_f1_str = ", ".join(
                     [
-                        f"{class_names[i]}: {val_f1_per_class[i][-1]:.3f}" # Loop 5 times
+                        f"{class_names[i]}: {val_f1_per_class[i][-1]:.3f}"  # Loop 5 times
                         for i in range(num_total_classes)
                     ]
                 )
                 class_acc_str = ", ".join(
                     [
-                        f"{class_names[i]}: {val_acc_per_class[i][-1]:.1f}%" # Loop 5 times
+                        f"{class_names[i]}: {val_acc_per_class[i][-1]:.1f}%"  # Loop 5 times
                         for i in range(num_total_classes)
                     ]
                 )
@@ -1385,7 +1418,7 @@ def _(
             # Final comprehensive evaluation
             val_predictions = np.array(val_predictions)
             val_targets = np.array(val_targets)
-            val_scores = np.array(val_scores) # Keep original scores for ROC
+            val_scores = np.array(val_scores)  # Keep original scores for ROC
 
             # Add 'nothing' class for final metric calculation
             val_targets_with_nothing = add_nothing_class(val_targets)
@@ -1394,29 +1427,37 @@ def _(
             # Calculate final metrics (using updated variables)
             try:
                 final_f1_weighted = f1_score(
-                    val_targets_with_nothing, val_predictions_with_nothing, average="weighted", zero_division=0
+                    val_targets_with_nothing,
+                    val_predictions_with_nothing,
+                    average="weighted",
+                    zero_division=0,
                 )
                 final_f1_per_class = f1_score(
-                    val_targets_with_nothing, val_predictions_with_nothing, average=None, zero_division=0
+                    val_targets_with_nothing,
+                    val_predictions_with_nothing,
+                    average=None,
+                    zero_division=0,
                 )
             except Exception as e:
                 print(f"Warning: Could not calculate final weighted/per-class F1: {e}")
                 final_f1_weighted = 0.0
-                final_f1_per_class = [0.0] * num_total_classes # Update length to 5
+                final_f1_per_class = [0.0] * num_total_classes  # Update length to 5
 
             # Calculate final per-class accuracy (using updated variables)
             final_acc_per_class = []
-            for i in range(num_total_classes): # Loop for 5 classes
+            for i in range(num_total_classes):  # Loop for 5 classes
                 class_pred = val_predictions_with_nothing[:, i]
                 class_target = val_targets_with_nothing[:, i]
-                class_acc = accuracy_score(class_target, class_pred) * 100 # Use sklearn accuracy
+                class_acc = (
+                    accuracy_score(class_target, class_pred) * 100
+                )  # Use sklearn accuracy
                 final_acc_per_class.append(class_acc)
 
             mlflow.log_metric(
                 "final_val_f1_weighted", final_f1_weighted
             )  # Log final F1
             # Log per-class final F1 scores (updated loop)
-            for i, class_name in enumerate(class_names): # Now iterates 5 times
+            for i, class_name in enumerate(class_names):  # Now iterates 5 times
                 mlflow.log_metric(f"final_val_f1_{class_name}", final_f1_per_class[i])
                 mlflow.log_metric(f"final_val_acc_{class_name}", final_acc_per_class[i])
 
@@ -1424,12 +1465,12 @@ def _(
             report = classification_report(
                 val_targets_with_nothing,
                 val_predictions_with_nothing,
-                target_names=class_names, # Use updated class names
+                target_names=class_names,  # Use updated class names
                 output_dict=True,
                 zero_division=0,
             )
             # Log metrics for each class (including macro F1) (updated loop)
-            for i, class_name in enumerate(class_names): # Now iterates 5 times
+            for i, class_name in enumerate(class_names):  # Now iterates 5 times
                 mlflow.log_metric(
                     f"val_precision_{class_name}", report[class_name]["precision"]
                 )
@@ -1446,7 +1487,10 @@ def _(
 
             # Create and log classification report in temporary file - CORRECTED VERSION (using updated variables)
             report_text = classification_report(
-                val_targets_with_nothing, val_predictions_with_nothing, target_names=class_names, zero_division=0 # Use updated variables
+                val_targets_with_nothing,
+                val_predictions_with_nothing,
+                target_names=class_names,
+                zero_division=0,  # Use updated variables
             )
             # Create temp file, write content, and close the file handle before logging
             tmp_report_file = tempfile.NamedTemporaryFile(
@@ -1461,10 +1505,16 @@ def _(
 
             # Create and log model summary in temporary file - CORRECTED VERSION
             final_f1_per_class_str = ", ".join(
-                [f"{class_names[i]}: {final_f1_per_class[i]:.4f}" for i in range(num_total_classes)] # Loop 5 times
+                [
+                    f"{class_names[i]}: {final_f1_per_class[i]:.4f}"
+                    for i in range(num_total_classes)
+                ]  # Loop 5 times
             )
             final_acc_per_class_str = ", ".join(
-                [f"{class_names[i]}: {final_acc_per_class[i]:.2f}%" for i in range(num_total_classes)] # Loop 5 times
+                [
+                    f"{class_names[i]}: {final_acc_per_class[i]:.2f}%"
+                    for i in range(num_total_classes)
+                ]  # Loop 5 times
             )
             model_summary = f"""
             Model Architecture: {model.arch_name}
@@ -1498,7 +1548,9 @@ def _(
             os.unlink(tmp_summary_file.name)  # Delete the temporary file after logging
 
             # Create and log confusion matrices
-            cm_fig = plot_confusion_matrices(val_targets_with_nothing, val_predictions_with_nothing, class_names) # Use updated variables
+            cm_fig = plot_confusion_matrices(
+                val_targets_with_nothing, val_predictions_with_nothing, class_names
+            )  # Use updated variables
             tmp_cm_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
             cm_fig.savefig(tmp_cm_file.name, dpi=150, bbox_inches="tight")
             tmp_cm_file.close()  # Close the file handle
@@ -1507,7 +1559,9 @@ def _(
             plt.close(cm_fig)
 
             # Create and log ROC curves (only for original 4 classes as 'nothing' is derived)
-            roc_fig = plot_roc_curves(val_targets, val_scores, class_names[:4]) # Use original 4 classes for ROC
+            roc_fig = plot_roc_curves(
+                val_targets, val_scores, class_names[:4]
+            )  # Use original 4 classes for ROC
             tmp_roc_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
             roc_fig.savefig(tmp_roc_file.name, dpi=150, bbox_inches="tight")
             tmp_roc_file.close()  # Close the file handle
@@ -1517,11 +1571,17 @@ def _(
 
             # Create and log prediction examples (including 'nothing' in plots if applicable)
             pred_examples_fig = plot_wrong_prediction_examples(
-                model, val_loader, class_names # Pass updated class names
+                model,
+                val_loader,
+                class_names,  # Pass updated class names
             )
-            if pred_examples_fig is not None: # Check if any wrong predictions were found
+            if (
+                pred_examples_fig is not None
+            ):  # Check if any wrong predictions were found
                 tmp_pred_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-                pred_examples_fig.savefig(tmp_pred_file.name, dpi=150, bbox_inches="tight")
+                pred_examples_fig.savefig(
+                    tmp_pred_file.name, dpi=150, bbox_inches="tight"
+                )
                 tmp_pred_file.close()  # Close the file handle
                 mlflow.log_artifact(tmp_pred_file.name, "wrong_prediction_examples")
                 os.unlink(tmp_pred_file.name)
@@ -1536,7 +1596,7 @@ def _(
                 train_f1_per_class,
                 val_f1_per_class,
                 epochs - 1,
-                class_names, # Pass updated class names
+                class_names,  # Pass updated class names
             )
             tmp_train_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
             final_main_fig.savefig(tmp_train_file.name, dpi=150, bbox_inches="tight")
@@ -1549,7 +1609,10 @@ def _(
 
             # Create final per-class F1 plot
             final_per_class_fig = create_f1_per_class_plot(
-                train_f1_per_class, val_f1_per_class, epochs - 1, class_names # Pass updated class names
+                train_f1_per_class,
+                val_f1_per_class,
+                epochs - 1,
+                class_names,  # Pass updated class names
             )
             tmp_f1_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
             final_per_class_fig.savefig(tmp_f1_file.name, dpi=150, bbox_inches="tight")
@@ -1560,7 +1623,10 @@ def _(
 
             # Create final per-class accuracy plot
             final_per_class_acc_fig = create_accuracy_per_class_plot(
-                train_acc_per_class, val_acc_per_class, epochs - 1, class_names # Pass updated class names
+                train_acc_per_class,
+                val_acc_per_class,
+                epochs - 1,
+                class_names,  # Pass updated class names
             )
             tmp_acc_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
             final_per_class_acc_fig.savefig(
@@ -1575,8 +1641,8 @@ def _(
             architecture_config = {
                 "arch_name": model.arch_name,
                 "input_channels": model.input_channels,
-                "input_height": model.input_height, # Use the stored attribute
-                "input_width": model.input_width,   # Use the stored attribute
+                "input_height": model.input_height,  # Use the stored attribute
+                "input_width": model.input_width,  # Use the stored attribute
                 "feature_output_size": model.feature_output_size,
                 "layers_config": model.layers_config,
                 "total_params": total_params,
@@ -1641,7 +1707,6 @@ def evaluate_model(model, test_loader):
         mlflow.log_metric("test_accuracy", accuracy)
     return accuracy
 
-
     def predict_single_image(model, image_array, threshold=0.0):
         """
         Predict a single image with your trained multi-label model
@@ -1676,7 +1741,6 @@ def evaluate_model(model, test_loader):
             ).float()  # Apply threshold to get binary predictions
 
         return predictions.numpy()[0], logits.numpy()[0]  # Remove batch dimension
-
 
     def predict_batch(model, image_batch, threshold=0.0):
         """
@@ -1714,7 +1778,6 @@ def evaluate_model(model, test_loader):
 
         return predictions.numpy(), logits.numpy()
 
-
     # To interpret the results:
     def interpret_predictions(
         predictions, class_names=["forward", "back", "left", "right"]
@@ -1733,6 +1796,7 @@ def evaluate_model(model, test_loader):
         print(f"Predicted actions: {active_actions}")
         print(f"Detailed: {result}")
         return result
+
     return (FlexibleCNN,)
 
 
@@ -1766,6 +1830,7 @@ def _(Dataset, np, torch):
             label = torch.FloatTensor(label)  # Keep as one-hot vector for multi-label
 
             return image, label
+
     return (CnnImageDataset,)
 
 
@@ -2009,6 +2074,7 @@ def _(pl):
         # Create final DataFrame and sort
         df_result = pl.DataFrame(result_rows)
         return df_result.sort(["record", "frame_idx", "is_augmented"])
+
     return (create_df_previous_frames,)
 
 
@@ -2186,6 +2252,7 @@ def _(Dataset, np, torch):
             label = torch.FloatTensor(label)  # Keep as one-hot vector for multi-label
 
             return image, label
+
     return (TemporalCnnImageDataset,)
 
 
