@@ -162,10 +162,8 @@ class MLflowModelNNMsgProcessor:
         """
         commands = self.nn_infer(message)
 
-        for command, start in commands:
-            # Only send commands if 'start' is True (based on the original example)
-            if start:
-                data_collector.onCarControlled(command, start)
+        for command, active in commands:
+            data_collector.onCarControlled(command, active)
 
 
 if __name__ == "__main__":
