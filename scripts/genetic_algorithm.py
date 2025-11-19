@@ -442,6 +442,8 @@ class GeneticAlgorithm:
                 json.dumps(self.initial_position),
                 "--base_record",
                 str(self.base_record_name),
+                "--port",
+                str(7654 + self.segment),
             ]
             if self.replay_file:
                 cmd.append(self.replay_file)

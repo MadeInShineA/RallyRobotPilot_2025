@@ -54,6 +54,7 @@ def main():
     start_segment = None
     generation = 0
     base_record = None
+    port = 7654
 
     args = sys.argv[3:]
 
@@ -76,6 +77,9 @@ def main():
             i += 2
         elif args[i] == "--base_record":
             base_record = args[i + 1]
+            i += 2
+        elif args[i] == "--port":
+            port = int(args[i + 1])
             i += 2
         else:
             if replay_file is None:
@@ -129,7 +133,7 @@ def main():
     # Set up Flask and remote controller like main.py
     flask_app = Flask(__name__)
     remote_controller = RemoteController(
-        car=car, connection_port=7654, flask_app=flask_app
+        car=car, connection_port=port, flask_app=flask_app
     )
 
     # Set up the car with autopilot
