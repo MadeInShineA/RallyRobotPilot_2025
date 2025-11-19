@@ -276,8 +276,10 @@ class Car(Entity):
 
     def check_respawn(self):
         # Respawn
+        """
         if held_keys["g"]:
             self.reset_car()
+        """
 
         if held_keys["v"]:
             self.multiray_sensor.set_enabled_rays(not self.multiray_sensor.enabled)
@@ -449,9 +451,24 @@ class Car(Entity):
             elif not held_keys["z"]:
                 self.z_pressed = False
 
-        if held_keys["g"] and not self.g_pressed:  # Reset car and checkpoint counts
+        if (
+            held_keys["g"] and not self.g_pressed
+        ):  # Stop record without saving and reset checkpoint counts
             self.g_pressed = True
-            self.reset_car()
+            was_recording = self.recording
+            self.recording = False
+            self.recorded_frames = []
+            self.frame_idx = 0
+            self.recording_start_time = 0.0
+            self.last_real_time = real_time.time()
+            print("Record stopped and cleared without saving")
+            if (
+                was_recording
+                and hasattr(self, "record_dir")
+                and os.path.exists(self.record_dir)
+            ):
+                shutil.rmtree(self.record_dir)
+                print(f"Record directory {self.record_dir} deleted")
             if self.checkpoint_handler:
                 self.checkpoint_handler.current_lap = 0
                 self.checkpoint_handler.next_checkpoint_index = 0
@@ -460,7 +477,8 @@ class Car(Entity):
                     entity_data["passed"] = False
                     entity_data["entity"].color = color.green
                     entity_data["text"].color = color.yellow
-                print("Car and checkpoint counts reset")
+                print("Checkpoint counts reset")
+            self.reset_car()
         elif not held_keys["g"]:
             self.g_pressed = False
 
@@ -669,6 +687,13 @@ class Car(Entity):
                 trail.end_trail()
         self.start_trail = True
 
+        self.recording = False
+        self.recorded_frames = []
+        self.frame_idx = 0
+        self.recording_start_time = 0.0
+        self.last_real_time = real_time.time()
+        print("Record cleared and turned off")
+
     def simple_intersects(self, entity):
         """
         A faster AABB intersects for detecting collision with
@@ -732,9 +757,13 @@ class Car(Entity):
         """
         self.recording = False
         print("Recording stopped")
-        print(f"is_genetic_car: {self.is_genetic_car}, recorded_frames: {len(self.recorded_frames)}")
+        print(
+            f"is_genetic_car: {self.is_genetic_car}, recorded_frames: {len(self.recorded_frames)}"
+        )
         if self.is_genetic_car:
-            print(f"Genetic attributes: gen={self.genetic_generation}, ind={self.genetic_individual}, seg={self.genetic_segment}")
+            print(
+                f"Genetic attributes: gen={self.genetic_generation}, ind={self.genetic_individual}, seg={self.genetic_segment}"
+            )
             # Save to genetic path
             dir_path = f"genetic_data/populations/{self.track.track_name if self.track else 'unknown'}/{self.base_record}/segment_{self.genetic_segment}/generation_{self.genetic_generation}"
             os.makedirs(dir_path, exist_ok=True)
@@ -816,7 +845,9 @@ class Car(Entity):
         )
         self.frame_idx += 1
         if not self.is_genetic_car:
-            application.base.screenshot(f"{self.record_dir}/images/frame_{self.frame_idx - 1}.png")
+            application.base.screenshot(
+                f"{self.record_dir}/images/frame_{self.frame_idx - 1}.png"
+            )
 
     def animate_text(self, text, top=1.2, bottom=0.6):
         """
