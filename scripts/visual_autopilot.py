@@ -40,9 +40,9 @@ class MLflowModelNNMsgProcessor:
         # These should match the 'images_dimensions' used in your notebook (e.g., (90, 160))
         # It's good practice to store these alongside the model or pass them as arguments
         self.target_size = (
-            90,
-            160,
-        )  # Adjust if your notebook used different dimensions
+            self.model.input_height,
+            self.model.input_width,
+        )  # Use model's input dimensions
         self.class_names = [
             "forward",
             "back",
@@ -118,7 +118,9 @@ class MLflowModelNNMsgProcessor:
 
         # If not enough frames, return no commands
         if len(self.image_buffer) < self.input_channels:
-            print(f"Warning: Not enough frames in buffer ({len(self.image_buffer)}/{self.input_channels}). Sending no commands.")
+            print(
+                f"Warning: Not enough frames in buffer ({len(self.image_buffer)}/{self.input_channels}). Sending no commands."
+            )
             return []
 
         # --- Stack images along channel dimension ---
@@ -196,4 +198,3 @@ if __name__ == "__main__":
     data_window.show()
 
     app.exec()
-
