@@ -62,7 +62,7 @@ def _(mo):
 
 @app.cell
 def _(Image, json, os, pl):
-    record_dir = "./visual_records/"
+    record_dir = "./old_visual_records/"
 
     all_records = []  # Accumulate all records here
 
@@ -1653,7 +1653,7 @@ def _(
 
     cnn_train_loader = DataLoader(cnn_train_dataset, batch_size=32, shuffle=True)
     cnn_test_loader = DataLoader(cnn_test_dataset, batch_size=32, shuffle=False)
-    return
+    return cnn_test_loader, cnn_train_loader
 
 
 @app.cell
@@ -1667,11 +1667,21 @@ def _(cnn_X_train):
 def _(load_dotenv, os):
     load_dotenv()
     cnn_experiment_name = os.getenv("MLFLOW_CNN_EXPERIMENT_NAME", "default_cnn_experiment")
-    return
+    return (cnn_experiment_name,)
 
 
-@app.cell(disabled=True)
-def _(FlexibleCNN, images_height, images_width, mlflow, os):
+@app.cell
+def _(
+    FlexibleCNN,
+    cnn_experiment_name,
+    cnn_test_loader,
+    cnn_train_loader,
+    images_height,
+    images_width,
+    mlflow,
+    os,
+    train_model,
+):
 
     cnn_architectures = [
         (
@@ -1699,10 +1709,57 @@ def _(FlexibleCNN, images_height, images_width, mlflow, os):
                 ("linear", {"out_features": 4}),
             ],
         ),
+        (
+            "not_so_simple",
+            [
+                # Feature extraction
+                (
+                    "conv",
+                    {"out_channels": 32, "kernel_size": 5, "stride": 1, "padding": 2},
+                ),
+                ("batchnorm", {}),
+                ("relu", {}),
+                ("maxpool", {"kernel_size": 2, "stride": 2}),
+                ("dropout", {"p": 0.3}),
+                (
+                    "conv",
+                    {"out_channels": 64, "kernel_size": 3, "stride": 1, "padding": 1},
+                ),
+                ("batchnorm", {}),
+                ("relu", {}),
+                ("maxpool", {"kernel_size": 2, "stride": 2}),
+                ("dropout", {"p": 0.3}),
+                (
+                    "conv",
+                    {"out_channels": 128, "kernel_size": 3, "stride": 1, "padding": 1},
+                ),
+                ("batchnorm", {}),
+                ("relu", {}),
+                ("maxpool", {"kernel_size": 2, "stride": 2}),
+                ("dropout", {"p": 0.3}),
+                (
+                    "conv",
+                    {"out_channels": 256, "kernel_size": 3, "stride": 1, "padding": 1},
+                ),
+                ("batchnorm", {}),
+                ("relu", {}),
+                ("maxpool", {"kernel_size": 2, "stride": 2}),
+                ("dropout", {"p": 0.4}),
+                # Classifier
+                ("flatten", {}),
+                ("linear", {"out_features": 256}),
+                ("relu", {}),
+                ("dropout", {"p": 0.4}),
+                ("linear", {"out_features": 64}),
+                ("relu", {}),
+                ("dropout", {"p": 0.4}),
+                ("linear", {"out_features": 4}),
+            ],
+        ),
     ]
 
     cnn_model = FlexibleCNN(
-        cnn_architectures[0],
+        cnn_architectures[1],
         input_channels=1,
         input_height=images_height,
         input_width=images_width,
@@ -1724,7 +1781,6 @@ def _(FlexibleCNN, images_height, images_width, mlflow, os):
     print(f"MLflow tracking URI: {mlflow.get_tracking_uri()}")
 
     cnn_weights = [1.5, 1.0, 2.0, 2.0] # Forward / Back / Left / Right
-    """
 
     train_model(
         cnn_model,
@@ -1733,10 +1789,10 @@ def _(FlexibleCNN, images_height, images_width, mlflow, os):
         epochs=20,
         learning_rate=0.001,
         experiment_name=cnn_experiment_name,
-        run_name="simple_conv_32_20_epochs_secret_strat_with_weights",
-        weights=weights
+        run_name="not_so_simple_20_epochs_with_weights",
+        weights=cnn_weights
     )
-    """
+
     return
 
 
@@ -1757,10 +1813,10 @@ def _(pl):
     def create_df_previous_frames(df_augmented, num_previous_frames):
         # Sort by record and frame_idx to ensure proper ordering
         df_sorted = df_augmented.sort(["record", "frame_idx"])
-    
+
         # Create the DataFrame that will hold the results
         result_rows = []
-    
+
         for record in df_sorted["record"].unique():
             # Separate augmented and non-augmented frames
             df_record_augmented = df_sorted.filter(
@@ -1769,14 +1825,14 @@ def _(pl):
             df_record_original = df_sorted.filter(
                 (pl.col("record") == record) & (pl.col("is_augmented") == False)
             ).sort("frame_idx")
-        
+
             # Process augmented frames (skip first num_previous_frames)
             for current_idx in range(num_previous_frames, len(df_record_augmented)):
                 current_row = df_record_augmented.row(current_idx, named=True)
                 current_frame = current_row["frame_idx"]
-            
+
                 new_row = current_row.copy()
-            
+
                 for prev_frame in range(1, num_previous_frames + 1):
                     prev_frame_idx = current_frame - prev_frame
                     prev_rows = df_record_augmented.filter(pl.col("frame_idx") == prev_frame_idx)
@@ -1790,16 +1846,16 @@ def _(pl):
                         new_row[f"right_prev_{prev_frame}"] = prev_row["right"]
                     else:
                         new_row[f"image_preprocessed_prev_{prev_frame}"] = None
-            
+
                 result_rows.append(new_row)
-        
+
             # Process original (non-augmented) frames (skip first num_previous_frames)
             for current_idx in range(num_previous_frames, len(df_record_original)):
                 current_row = df_record_original.row(current_idx, named=True)
                 current_frame = current_row["frame_idx"]
-            
+
                 new_row = current_row.copy()
-            
+
                 for prev_frame in range(1, num_previous_frames + 1):
                     prev_frame_idx = current_frame - prev_frame
                     prev_rows = df_record_original.filter(pl.col("frame_idx") == prev_frame_idx)
@@ -1813,9 +1869,9 @@ def _(pl):
                         new_row[f"right_prev_{prev_frame}"] = prev_row["right"]
                     else:
                         new_row[f"image_preprocessed_prev_{prev_frame}"] = None
-            
+
                 result_rows.append(new_row)
-    
+
         # Create final DataFrame and sort
         df_result = pl.DataFrame(result_rows)
         return df_result.sort(["record", "frame_idx", "is_augmented"])
@@ -1861,21 +1917,21 @@ def _(df_previous_frames_array_image, np, num_previous_frames, pl):
     def stack_images(row_dict, num_prev_frames):
         """Stack images along the channel dimension"""
         images = []
-    
+
         # Add previous frames in reverse order (prev_n, ..., prev_1) then current
         for i in range(num_prev_frames, 0, -1):
             img = row_dict.get(f"2d_array_image_preprocessed_prev_{i}")
             if img is not None:
                 images.append(img)
-    
+
         # Add current frame
         current_img = row_dict.get("2d_array_image_preprocessed")
         if current_img is not None:
             images.append(current_img)
-    
+
         if not images:
             return None
-    
+
         # Stack along channel dimension (last axis)
         # Assuming images are 2D (grayscale) or 3D (H, W, C)
         try:
@@ -2005,14 +2061,14 @@ def _(
 
     temporal_cnn_train_loader = DataLoader(temporal_cnn_train_dataset, batch_size=32, shuffle=True)
     temporal_cnn_test_loader = DataLoader(temporal_cnn_test_dataset, batch_size=32, shuffle=False)
-    return temporal_cnn_test_loader, temporal_cnn_train_loader
+    return
 
 
 @app.cell
 def _(load_dotenv, os):
     load_dotenv()
     temporal_cnn_experiment_name = os.getenv("MLFLOW_TEMPORAL_CNN_EXPERIMENT_NAME", "default_cnn_experiment")
-    return (temporal_cnn_experiment_name,)
+    return
 
 
 @app.cell
@@ -2023,10 +2079,6 @@ def _(
     mlflow,
     num_previous_frames,
     os,
-    temporal_cnn_experiment_name,
-    temporal_cnn_test_loader,
-    temporal_cnn_train_loader,
-    train_model,
 ):
     lstm_architectures = [
         (
@@ -2054,10 +2106,38 @@ def _(
                 ("linear", {"out_features": 4}),
             ],
         ),
+        (
+            "not_so_simple_cnn",
+            [
+                # Feature extraction
+                (
+                    "conv",
+                    {"out_channels": 64, "kernel_size": 3, "stride": 1, "padding": 1},
+                ),
+                ("relu", {}),
+                ("maxpool", {"kernel_size": 2, "stride": 2}),
+                ("dropout", {"p": 0.2}),
+                (
+                    "conv",
+                    {"out_channels": 64, "kernel_size": 3, "stride": 1, "padding": 1},
+                ),
+                ("relu", {}),
+                ("maxpool", {"kernel_size": 2, "stride": 2}),
+                ("dropout", {"p": 0.2}),
+                # Classifier
+                ("linear", {"out_features": 32}),
+                ("relu", {}),
+                ("dropout", {"p": 0.2}),
+                ("linear", {"out_features": 32}),
+                ("relu", {}),
+                ("dropout", {"p": 0.2}),
+                ("linear", {"out_features": 4}),
+            ],
+        ),
     ]
 
     temporal_cnn_model = FlexibleCNN(
-        lstm_architectures[0],
+        lstm_architectures[1],
         input_channels=num_previous_frames + 1,
         input_height=images_height,
         input_width=images_width,
@@ -2080,6 +2160,7 @@ def _(
 
     temporal_cnn_weights = [1.5, 1.0, 2.0, 2.0] # Forward / Back / Left / Right
 
+    """
     train_model(
         temporal_cnn_model,
         temporal_cnn_train_loader,
@@ -2087,10 +2168,10 @@ def _(
         epochs=20,
         learning_rate=0.001,
         experiment_name=temporal_cnn_experiment_name,
-        run_name="simple_conv_32_20_epochs_secret_strat_with_weights",
+        run_name="not_so_simple_20_epochs_with_weights",
         weights=temporal_cnn_weights
     )
-
+    """
     return
 
 
