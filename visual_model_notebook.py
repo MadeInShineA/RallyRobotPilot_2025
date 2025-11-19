@@ -232,7 +232,7 @@ def _(mo):
 
 @app.cell
 def _(Image):
-    def preprocess_image(image: Image, size: tuple[int] = (160, 224)) -> Image:
+    def preprocess_image(image: Image, size: tuple[int, int] = (80, 112)) -> Image:
         image = image.convert("L")  # Convert to grayscale
         image = image.resize(
             size, Image.Resampling.LANCZOS
@@ -243,13 +243,13 @@ def _(Image):
 
 @app.cell
 def _(df_cleaned, pl, preprocess_image):
-    images_dimensions = (160, 224)
+    images_dimensions = (80, 112)
     images_width, images_height = images_dimensions
 
     df_cleaned_pil_preprocessed = df_cleaned.with_columns(
         pl.col("image")
         .map_elements(
-            lambda img: preprocess_image(img, size=images_dimensions),
+            lambda img: preprocess_image(img, size=(images_width, images_height)),
             return_dtype=pl.Object,
         )
         .alias("image_preprocessed")
@@ -530,9 +530,9 @@ def _(
     torch,
 ):
     class FlexibleCNN(nn.Module):
-        def __init__(
-            self, arch_config, input_channels=1, input_height=40, input_width=66
-        ):
+    def __init__(
+        self, arch_config, input_channels=1, input_height=112, input_width=80
+    ):
             super(FlexibleCNN, self).__init__()
             name, layers = arch_config
             self.arch_name = name
@@ -595,14 +595,19 @@ def _(
                     conv_params = params.copy()
                     conv_params["in_channels"] = in_channels
                     modules.append(nn.Conv2d(**conv_params))
+                if "out_channels" in params:
+                    conv_params["in_channels"] = in_channels
+                    modules.append(nn.Conv2d(**conv_params))
                     if "out_channels" in params:
                         in_channels = params["out_channels"]
-                    if "out_channels" in params:
-                        modules.append(nn.BatchNorm2d(params["out_channels"]))
                 elif layer_type == "maxpool":
                     modules.append(nn.MaxPool2d(**params))
                 elif layer_type == "dropout":
                     modules.append(nn.Dropout(**params))
+                elif layer_type == "batchnorm":
+                    modules.append(nn.BatchNorm2d(in_channels))
+                elif layer_type == "flatten":
+                    pass  # Flatten is handled in forward
                 elif layer_type == "relu":
                     modules.append(nn.ReLU(**params))
                 elif layer_type == "sigmoid":
@@ -1615,25 +1620,26 @@ def _(
             return model
 
 
-    def evaluate_model(model, test_loader):
-        """
-        Evaluate the model and log metrics
-        """
-        model.eval()
-        correct = 0
-        total = 0
-        with torch.no_grad():
-            for data, target in test_loader:
-                outputs = model(data)
-                _, predicted = torch.max(outputs.data, 1)
-                total += target.size(0)
-                correct += (predicted == target).sum().item()
+def evaluate_model(model, test_loader):
+    """
+    Evaluate the model and log metrics for multi-label classification
+    """
+    model.eval()
+    correct = 0
+    total = 0
+    with torch.no_grad():
+        for data, target in test_loader:
+            outputs = model(data)
+            probabilities = torch.sigmoid(outputs)
+            predicted = (probabilities > 0.5).float()
+            total += target.numel()
+            correct += (predicted == target).sum().item()
 
-        accuracy = 100 * correct / total
-        # Log evaluation metrics if MLflow is active
-        if mlflow.active_run():
-            mlflow.log_metric("test_accuracy", accuracy)
-        return accuracy
+    accuracy = 100 * correct / total
+    # Log evaluation metrics if MLflow is active
+    if mlflow.active_run():
+        mlflow.log_metric("test_accuracy", accuracy)
+    return accuracy
 
 
     def predict_single_image(model, image_array, threshold=0.0):
@@ -1808,6 +1814,7 @@ def _(FlexibleCNN, images_height, images_width, mlflow, os):
                     "conv",
                     {"out_channels": 32, "kernel_size": 3, "stride": 1, "padding": 1},
                 ),
+                ("batchnorm", {}),
                 ("relu", {}),
                 ("maxpool", {"kernel_size": 2, "stride": 2}),
                 ("dropout", {"p": 0.2}),
@@ -1815,6 +1822,7 @@ def _(FlexibleCNN, images_height, images_width, mlflow, os):
                     "conv",
                     {"out_channels": 32, "kernel_size": 3, "stride": 1, "padding": 1},
                 ),
+                ("batchnorm", {}),
                 ("relu", {}),
                 ("maxpool", {"kernel_size": 2, "stride": 2}),
                 ("dropout", {"p": 0.2}),
