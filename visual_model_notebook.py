@@ -29,16 +29,20 @@ def _():
     import torch.nn as nn
     import mlflow
     import mlflow.pytorch
-    from sklearn.metrics import classification_report, confusion_matrix, roc_curve, auc
+    from sklearn.metrics import classification_report, confusion_matrix, roc_curve, auc, accuracy_score
     import tempfile
     from torch.utils.data import Dataset, DataLoader
+    import matplotlib.gridspec as gridspec
 
     return (
         DataLoader,
         Dataset,
         Image,
+        accuracy_score,
         auc,
+        classification_report,
         confusion_matrix,
+        gridspec,
         json,
         load_dotenv,
         mlflow,
@@ -50,6 +54,7 @@ def _():
         plt,
         roc_curve,
         sns,
+        tempfile,
         torch,
         train_test_split,
     )
@@ -63,7 +68,7 @@ def _(mo):
 
 @app.cell
 def _(Image, json, os, pl):
-    record_dir = "./old_visual_records/"
+    record_dir = "./visual_records/"
 
     all_records = []  # Accumulate all records here
 
@@ -152,9 +157,7 @@ def _(df):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""### Clean the first frames of each record when nothing happens (all inputs are 0)"""
-    )
+    mo.md(r"""### Clean the first frames of each record when nothing happens (all inputs are 0)""")
     return
 
 
@@ -229,19 +232,18 @@ def _(mo):
 
 @app.cell
 def _(Image):
-    def preprocess_image(image: Image, size: tuple[int] = (90, 160)) -> Image:
+    def preprocess_image(image: Image, size: tuple[int] = (160, 224)) -> Image:
         image = image.convert("L")  # Convert to grayscale
         image = image.resize(
             size, Image.Resampling.LANCZOS
         )  # Resize to exact dimensions
         return image
-
     return (preprocess_image,)
 
 
 @app.cell
 def _(df_cleaned, pl, preprocess_image):
-    images_dimensions = (40, 66)
+    images_dimensions = (160, 224)
     images_width, images_height = images_dimensions
 
     df_cleaned_pil_preprocessed = df_cleaned.with_columns(
@@ -255,10 +257,12 @@ def _(df_cleaned, pl, preprocess_image):
     return df_cleaned_pil_preprocessed, images_height, images_width
 
 
-@app.cell
-def _(df_cleaned_pil_preprocessed):
-    df_cleaned_pil_preprocessed.head()
-    return
+app._unparsable_cell(
+    r"""
+        df_cleaned_pil_preprocessed.head()
+    """,
+    name="_"
+)
 
 
 @app.cell
@@ -299,7 +303,6 @@ def _(pl, sns):
             hue="control",
             palette=["green", "red", "blue", "orange"],
         )
-
     return (plot_controls,)
 
 
@@ -372,7 +375,6 @@ def _(pl, plt, sns):
 
         plt.tight_layout()
         return ax
-
     return (plot_usage,)
 
 
@@ -508,45 +510,60 @@ def _(cnn_y_train):
 
 
 @app.cell(hide_code=True)
-def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
+def _(
+    accuracy_score,
+    auc,
+    classification_report,
+    confusion_matrix,
+    datetime,
+    f1_score,
+    gridspec,
+    json,
+    mlflow,
+    nn,
+    np,
+    os,
+    plt,
+    roc_curve,
+    sns,
+    tempfile,
+    torch,
+):
     class FlexibleCNN(nn.Module):
         def __init__(
-            self, arch_config, input_channels=1, input_height=160, input_width=90
+            self, arch_config, input_channels=1, input_height=40, input_width=66
         ):
             super(FlexibleCNN, self).__init__()
-
             name, layers = arch_config
             self.arch_name = name
             self.layers_config = layers
             self.input_channels = input_channels
+            # Store input dimensions as model attributes
+            self.input_height = input_height
+            self.input_width = input_width
 
             # Identify where features end (before first linear layer)
             feature_configs = []
             classifier_configs = []
-
             # Find the first linear layer to separate features from classifier
             first_linear_idx = len(layers)
             for i, (layer_type, _) in enumerate(layers):
                 if layer_type == "linear":
                     first_linear_idx = i
                     break
-
             feature_configs = layers[:first_linear_idx]
             classifier_configs = layers[first_linear_idx:]
-
             # Calculate the flattened size after features
             self.features = self._build_sequential_with_channels(feature_configs)
             self.feature_output_size = self._get_feature_output_size(
                 input_height, input_width
             )
-
             if classifier_configs:
                 # Update all linear layers' in_features appropriately
                 updated_classifier_configs = []
                 prev_out_features = (
                     self.feature_output_size
                 )  # For the first linear layer
-
                 for layer_type, params in classifier_configs:
                     if layer_type == "linear":
                         updated_params = params.copy()
@@ -556,7 +573,6 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
                         prev_out_features = params["out_features"]
                     else:
                         updated_classifier_configs.append((layer_type, params))
-
                 self.classifier = self._build_sequential(updated_classifier_configs)
             else:
                 self.classifier = nn.Identity()
@@ -574,16 +590,13 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
         def _build_sequential_with_channels(self, layer_configs):
             modules = []
             in_channels = self.input_channels
-
             for layer_type, params in layer_configs:
                 if layer_type == "conv":
                     conv_params = params.copy()
                     conv_params["in_channels"] = in_channels
                     modules.append(nn.Conv2d(**conv_params))
-
                     if "out_channels" in params:
                         in_channels = params["out_channels"]
-
                     if "out_channels" in params:
                         modules.append(nn.BatchNorm2d(params["out_channels"]))
                 elif layer_type == "maxpool":
@@ -598,7 +611,6 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
                     modules.append(nn.Tanh())
                 elif layer_type == "softmax":
                     modules.append(nn.Softmax(**params))
-
             return nn.Sequential(*modules)
 
         def _build_sequential(self, layer_configs):
@@ -621,7 +633,6 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
                 elif layer_type == "softmax":
                     modules.append(nn.Softmax(**params))
                 # Add other activation functions as needed
-
             return nn.Sequential(*modules)
 
         def forward(self, x):
@@ -629,6 +640,21 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             x = torch.flatten(x, 1)
             x = self.classifier(x)
             return x
+
+    def add_nothing_class(y):
+        """Calculates the 'nothing' class based on existing labels/predictions."""
+        # Check if any of the first 4 classes are active (1) along the class axis (axis=1)
+        # If none are active, 'nothing' is 1, otherwise 0.
+        # Assume y is a numpy array of shape (N, num_classes) where num_classes is 4 or 5
+        if y.shape[1] >= 4:
+            nothing_mask = np.all(y[:, :4] == 0, axis=1)
+            nothing_col = nothing_mask.astype(int).reshape(-1, 1)
+            return np.concatenate([y, nothing_col], axis=1)
+        else:
+            # If y doesn't have at least 4 original classes, just add a zero column
+            zero_col = np.zeros((y.shape[0], 1), dtype=y.dtype)
+            return np.concatenate([y, zero_col], axis=1)
+
 
     def create_training_plots(
         train_losses,
@@ -663,7 +689,12 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
 
         # Per-class F1 scores
         epochs_range = range(1, epoch + 2)
-        colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"]
+        # Use a color map or list that can handle the number of classes
+        # Adjust color list if necessary, or use a colormap
+        num_classes = len(class_names)
+        colors = plt.cm.get_cmap('tab10', num_classes)(range(num_classes))
+        # If you have a specific color list, ensure it's long enough
+        # colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"] # Example for 5 classes
 
         for i, class_name in enumerate(class_names):
             axes[2].plot(
@@ -682,7 +713,6 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
                 alpha=0.9,
                 label=f"Val {class_name}",
             )
-
         axes[2].set_title("Per-Class F1-Scores")
         axes[2].set_xlabel("Epoch")
         axes[2].set_ylabel("F1-Score")
@@ -693,12 +723,21 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
         plt.tight_layout()
         return fig
 
+
     def create_f1_per_class_plot(
         train_f1_per_class, val_f1_per_class, epoch, class_names
     ):
-        """Create plots showing F1 scores per class"""
-        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-        axes = axes.ravel()
+        """Create plots showing F1 scores per class - Updated for N classes"""
+        num_classes = len(class_names)
+        # Calculate subplot grid dimensions
+        n_cols = 2
+        n_rows = (num_classes + n_cols - 1) // n_cols  # Ceiling division
+
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(14, 5 * n_rows))
+        if n_rows == 1:
+            axes = [axes] if num_classes == 1 else axes
+        else:
+            axes = axes.ravel()
 
         for i, class_name in enumerate(class_names):
             epochs_range = range(1, epoch + 2)
@@ -714,7 +753,6 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             axes[i].set_ylim(0, 1)
             axes[i].legend()
             axes[i].grid(True)
-
             # Add final values as text
             if len(val_f1_per_class[i]) > 0:
                 final_val_f1 = val_f1_per_class[i][-1]
@@ -727,13 +765,26 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
                     bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
                 )
 
+        # Hide any unused subplots
+        for j in range(i + 1, len(axes)):
+            axes[j].set_visible(False)
+
         plt.tight_layout()
         return fig
 
+
     def plot_confusion_matrices(y_true, y_pred, class_names):
-        """Create confusion matrices for each class (multi-label)"""
-        fig, axes = plt.subplots(2, 2, figsize=(12, 10))
-        axes = axes.ravel()
+        """Create confusion matrices for each class (multi-label) - Updated for N classes"""
+        num_classes = len(class_names)
+        # Calculate subplot grid dimensions
+        n_cols = 2
+        n_rows = (num_classes + n_cols - 1) // n_cols  # Ceiling division
+
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(12 * n_cols / 2, 5 * n_rows))
+        if n_rows == 1:
+            axes = [axes] if num_classes == 1 else axes
+        else:
+            axes = axes.ravel()
 
         for i, class_name in enumerate(class_names):
             # Binary confusion matrix for each class
@@ -751,13 +802,17 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             axes[i].set_xlabel("Predicted")
             axes[i].set_ylabel("Actual")
 
+        # Hide any unused subplots
+        for j in range(i + 1, len(axes)):
+            axes[j].set_visible(False)
+
         plt.tight_layout()
         return fig
+
 
     def plot_roc_curves(y_true, y_scores, class_names):
         """Create ROC curves for each class"""
         fig, ax = plt.subplots(figsize=(10, 8))
-
         for i, class_name in enumerate(class_names):
             fpr, tpr, _ = roc_curve(y_true[:, i], y_scores[:, i])
             roc_auc = auc(fpr, tpr)
@@ -769,30 +824,58 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
         ax.set_title("ROC Curves - Multi-label Classification")
         ax.legend()
         ax.grid(True)
-
         return fig
 
-    def plot_prediction_examples(model, test_loader, class_names, num_examples=4):
-        """Visualize prediction examples with bar plots under images"""
-        import matplotlib.gridspec as gridspec
 
+    def plot_prediction_examples(model, test_loader, class_names, num_examples=4):
+        """Visualize prediction examples with bar plots under images - Updated for N classes"""
         model.eval()
         images, true_labels, pred_labels, pred_scores = [], [], [], []
-
         with torch.no_grad():
             for data, target in test_loader:
                 outputs = model(data)
-                predictions = (outputs > 0).float()
+                predictions = (torch.sigmoid(outputs) > 0.5).float()
                 scores = torch.sigmoid(outputs)  # Convert logits to probabilities
-
                 # Store examples
                 images.extend(data.cpu().numpy()[:2])
                 true_labels.extend(target.cpu().numpy()[:2])
                 pred_labels.extend(predictions.cpu().numpy()[:2])
                 pred_scores.extend(scores.cpu().numpy()[:2])
-
                 if len(images) >= num_examples:
                     break
+
+        # Ensure labels/preds/scores have 'nothing' column if needed
+        # This function assumes the class_names list passed in already includes 'nothing'
+        # and the model outputs are for the original 4 classes.
+        # We add 'nothing' here based on the original 4 classes in the labels/preds/scores.
+        true_labels_np = np.array(true_labels)
+        pred_labels_np = np.array(pred_labels)
+        pred_scores_np = np.array(pred_scores)
+
+        # Only add 'nothing' if class_names indicates it should be there (i.e., length 5)
+        if len(class_names) == 5:
+            true_labels_np = add_nothing_class(true_labels_np)
+            pred_labels_np = add_nothing_class(pred_labels_np)
+            # For scores, the 'nothing' probability is 1 if all original are 0, else 0 (or derive from model somehow)
+            # For simplicity here, we'll just add a column of zeros to scores, as the model doesn't predict 'nothing' directly.
+            # If you want the model to predict 'nothing' probability, you'd need to modify the model.
+            # For now, we calculate 'nothing' only for labels/preds for metrics.
+            # Let's just pass the original scores to the bar plot for the original classes.
+            # We need to adjust the plotting loop to handle the score array correctly.
+            scores_for_plot = pred_scores_np # Use original scores for plotting
+            if scores_for_plot.shape[1] < len(class_names): # If scores array is missing 'nothing'
+                 # Add a column of zeros or calculate 'nothing' score (e.g., 1 - max of others, or 1 if all others < 0.5)
+                 # For now, adding zeros is simplest if the model doesn't predict 'nothing'
+                 # Let's assume the model scores are for 4 classes, and we add a 'nothing' score column.
+                 # A simple 'nothing' score could be: prob_nothing = 1 if all original probs < 0.5 else 0
+                 # Or prob_nothing = 1 - max(original_probs)
+                 # Let's use prob_nothing = 1 - max(original_probs) for a continuous score.
+                 max_probs = np.max(pred_scores_np, axis=1, keepdims=True) # Shape (N, 1)
+                 prob_nothing = 1 - max_probs # Shape (N, 1)
+                 scores_for_plot = np.concatenate([pred_scores_np, prob_nothing], axis=1) # Shape (N, 5)
+        else:
+            scores_for_plot = pred_scores_np # Use original scores if 'nothing' not expected
+
 
         # Create figure with custom grid for image + bar plot layout
         fig = plt.figure(figsize=(12, 10))
@@ -800,11 +883,17 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             num_examples, 1, height_ratios=[3] * num_examples, hspace=0.4
         )
 
+        # Use a color map or list that can handle the number of classes
+        num_plot_classes = len(class_names)
+        colors = plt.cm.get_cmap('tab10', num_plot_classes)(range(num_plot_classes))
+        # If you have a specific color list, ensure it's long enough
+        # colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"] # Example for 5 classes
+
         for i in range(min(num_examples, len(images))):
             img = images[i][0]  # Grayscale channel
-            true_label = true_labels[i]
-            pred_label = pred_labels[i]
-            pred_score = pred_scores[i]
+            true_label = true_labels_np[i] # Use potentially updated labels
+            pred_label = pred_labels_np[i] # Use potentially updated preds
+            pred_score = scores_for_plot[i] # Use potentially updated scores
 
             # Create sub-grid for each example (image + bar plot)
             sub_gs = gridspec.GridSpecFromSubplotSpec(
@@ -814,7 +903,6 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             # Image subplot
             ax_img = fig.add_subplot(sub_gs[0])
             ax_img.imshow(img, cmap="gray")
-
             # Create title with true and predicted labels
             true_actions = [
                 class_names[j] for j, val in enumerate(true_label) if val > 0
@@ -822,12 +910,10 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             pred_actions = [
                 class_names[j] for j, val in enumerate(pred_label) if val > 0
             ]
-
             if not true_actions:
-                true_actions = ["none"]
+                true_actions = ["none"] # Or class_names[-1] if always including 'nothing'
             if not pred_actions:
-                pred_actions = ["none"]
-
+                pred_actions = ["none"] # Or class_names[-1] if always including 'nothing'
             title = f"True: {', '.join(true_actions)} | Pred: {', '.join(pred_actions)}"
             ax_img.set_title(title, fontsize=10)
             ax_img.axis("off")
@@ -837,14 +923,13 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             bars = ax_bar.bar(
                 class_names,
                 pred_score,
-                color=["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"],
+                color=colors,
                 alpha=0.7,
             )
             ax_bar.set_ylim(0, 1)
             ax_bar.set_ylabel("Prob", fontsize=8)
             ax_bar.tick_params(axis="x", labelsize=8)
             ax_bar.tick_params(axis="y", labelsize=8)
-
             # Add value labels on bars
             for j, (bar, score) in enumerate(zip(bars, pred_score)):
                 ax_bar.text(
@@ -855,12 +940,12 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
                     va="bottom",
                     fontsize=7,
                 )
-
             # Add grid for better readability
             ax_bar.grid(axis="y", alpha=0.3, linestyle="--")
 
         plt.tight_layout()
         return fig
+
 
     def plot_wrong_prediction_examples(model, test_loader, class_names, num_examples=4):
         """
@@ -868,19 +953,13 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
         For multi-label classification, a prediction is considered false if
         predicted vector != true vector.
         """
-        import matplotlib.pyplot as plt
-        import matplotlib.gridspec as gridspec
-        import numpy as np
-
         model.eval()
         images, true_labels, pred_labels, pred_scores = [], [], [], []
-
         with torch.no_grad():
             for data, target in test_loader:
                 outputs = model(data)
                 probabilities = torch.sigmoid(outputs)
                 predictions = (probabilities > 0.5).float()
-
                 # Convert to numpy for comparison
                 pred_np = predictions.cpu().numpy()
                 target_np = target.cpu().numpy()
@@ -904,15 +983,37 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             print("No false predictions found in the provided data.")
             return None
 
+        # Ensure labels/preds/scores have 'nothing' column if needed
+        true_labels_np = np.array(true_labels)
+        pred_labels_np = np.array(pred_labels)
+        pred_scores_np = np.array(pred_scores)
+
+        if len(class_names) == 5:
+            true_labels_np = add_nothing_class(true_labels_np)
+            pred_labels_np = add_nothing_class(pred_labels_np)
+            # Similar logic for scores as in plot_prediction_examples if needed
+            max_probs = np.max(pred_scores_np, axis=1, keepdims=True) # Shape (N, 1)
+            prob_nothing = 1 - max_probs # Shape (N, 1)
+            scores_for_plot = np.concatenate([pred_scores_np, prob_nothing], axis=1) # Shape (N, 5)
+        else:
+            scores_for_plot = pred_scores_np
+
+
         # Create figure
         fig = plt.figure(figsize=(12, 3 * len(images)))
         gs = gridspec.GridSpec(len(images), 1, hspace=0.4)
 
+        # Use a color map or list that can handle the number of classes
+        num_plot_classes = len(class_names)
+        colors = plt.cm.get_cmap('tab10', num_plot_classes)(range(num_plot_classes))
+        # If you have a specific color list, ensure it's long enough
+        # colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"] # Example for 5 classes
+
         for i in range(len(images)):
             img = images[i]
-            true_label = true_labels[i]
-            pred_label = pred_labels[i]
-            pred_score = pred_scores[i]
+            true_label = true_labels_np[i] # Use potentially updated labels
+            pred_label = pred_labels_np[i] # Use potentially updated preds
+            pred_score = scores_for_plot[i] # Use potentially updated scores
 
             # Sub-grid: image + bar plot
             sub_gs = gridspec.GridSpecFromSubplotSpec(
@@ -924,10 +1025,10 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             ax_img.imshow(img, cmap="gray")
             true_actions = [
                 class_names[j] for j, val in enumerate(true_label) if val > 0
-            ] or ["none"]
+            ] or ["none"] # Or class_names[-1] if always including 'nothing'
             pred_actions = [
                 class_names[j] for j, val in enumerate(pred_label) if val > 0
-            ] or ["none"]
+            ] or ["none"] # Or class_names[-1] if always including 'nothing'
             title = f"True: {', '.join(true_actions)} | Pred: {', '.join(pred_actions)}"
             ax_img.set_title(title, fontsize=10, color="red")  # Red to highlight error
             ax_img.axis("off")
@@ -937,7 +1038,7 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             bars = ax_bar.bar(
                 class_names,
                 pred_score,
-                color=["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728"],
+                color=colors,
                 alpha=0.7,
             )
             ax_bar.set_ylim(0, 1)
@@ -945,7 +1046,6 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             ax_bar.tick_params(axis="x", labelsize=8)
             ax_bar.tick_params(axis="y", labelsize=8)
             ax_bar.grid(axis="y", alpha=0.3, linestyle="--")
-
             # Add score labels on bars
             for bar, score in zip(bars, pred_score):
                 ax_bar.text(
@@ -960,12 +1060,21 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
         plt.tight_layout()
         return fig
 
+
     def create_accuracy_per_class_plot(
         train_acc_per_class, val_acc_per_class, epoch, class_names
     ):
-        """Create plots showing accuracy per class"""
-        fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-        axes = axes.ravel()
+        """Create plots showing accuracy per class - Updated for N classes"""
+        num_classes = len(class_names)
+        # Calculate subplot grid dimensions
+        n_cols = 2
+        n_rows = (num_classes + n_cols - 1) // n_cols  # Ceiling division
+
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(14, 5 * n_rows))
+        if n_rows == 1:
+            axes = [axes] if num_classes == 1 else axes
+        else:
+            axes = axes.ravel()
 
         for i, class_name in enumerate(class_names):
             epochs_range = range(1, epoch + 2)
@@ -981,7 +1090,6 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             axes[i].set_ylim(0, 100)
             axes[i].legend()
             axes[i].grid(True)
-
             # Add final values as text
             if len(val_acc_per_class[i]) > 0:
                 final_val_acc = val_acc_per_class[i][-1]
@@ -994,8 +1102,13 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
                     bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
                 )
 
+        # Hide any unused subplots
+        for j in range(i + 1, len(axes)):
+            axes[j].set_visible(False)
+
         plt.tight_layout()
         return fig
+
 
     def train_model(
         model,
@@ -1010,23 +1123,8 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
         """
         Enhanced training with comprehensive MLflow logging and graphics including weighted F1-score
         """
-        import matplotlib.pyplot as plt
-        import seaborn as sns
-        import numpy as np
-        from sklearn.metrics import (
-            classification_report,
-            confusion_matrix,
-            roc_curve,
-            auc,
-            f1_score,
-        )
-        import tempfile
-        import os
-        import datetime  # Add this import if not already present
-
         # Set up MLflow
         mlflow.set_experiment(experiment_name)
-
         if run_name is None:
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             run_name = f"{model.arch_name}_lr{learning_rate}_ep{epochs}_{timestamp}"
@@ -1037,6 +1135,8 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             mlflow.log_param("epochs", epochs)
             mlflow.log_param("model_architecture", model.arch_name)
             mlflow.log_param("input_channels", model.input_channels)
+            mlflow.log_param("input_height", model.input_height) # Log input height
+            mlflow.log_param("input_width", model.input_width)  # Log input width
             mlflow.log_param("feature_output_size", model.feature_output_size)
             mlflow.log_param("batch_size", train_loader.batch_size)
             mlflow.log_param("optimizer", "Adam")
@@ -1053,7 +1153,7 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
             if weights is not None:
-                if len(weights) != 4:  # Assuming 4 classes
+                if len(weights) != 4:  # Assuming 4 classes initially
                     raise ValueError(
                         f"Expected 4 weights for 4 classes, got {len(weights)}"
                     )
@@ -1073,20 +1173,21 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             train_losses, val_losses = [], []
             train_accs, val_accs = [], []
             train_f1s, val_f1s = [], []  # New: track overall F1 scores
+            num_original_classes = 4 # Assuming original classes are forward, back, left, right
+            num_total_classes = 5 # Including the 'nothing' class
             train_f1_per_class = [
-                [] for _ in range(4)
+                [] for _ in range(num_total_classes)
             ]  # Track F1 per class for training
             val_f1_per_class = [
-                [] for _ in range(4)
+                [] for _ in range(num_total_classes)
             ]  # Track F1 per class for validation
             train_acc_per_class = [
-                [] for _ in range(4)
+                [] for _ in range(num_total_classes)
             ]  # Track accuracy per class for training
             val_acc_per_class = [
-                [] for _ in range(4)
+                [] for _ in range(num_total_classes)
             ]  # Track accuracy per class for validation
-
-            class_names = ["forward", "back", "left", "right"]
+            class_names = ["forward", "back", "left", "right", "nothing"] # Update class names
 
             for epoch in range(epochs):
                 # Training phase
@@ -1102,17 +1203,15 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
                     loss = criterion(output, target)
                     loss.backward()
                     optimizer.step()
-
                     train_loss += loss.item()
 
                     # Use sigmoid probabilities with 0.5 threshold (like original)
                     probabilities = torch.sigmoid(output)
                     predicted = (probabilities > 0.5).float()
-
                     train_total += target.numel()
                     train_correct += (predicted == target).sum().item()
 
-                    # Store predictions and targets for F1 calculation
+                    # Store predictions and targets for F1 calculation (original 4 classes)
                     train_pred_list.append(predicted.cpu().numpy())
                     train_target_list.append(target.cpu().numpy())
 
@@ -1120,35 +1219,41 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
                 train_pred_all = np.vstack(train_pred_list)
                 train_target_all = np.vstack(train_target_list)
 
-                # Overall weighted F1
+                # Add the 'nothing' class column to both targets and predictions based on original 4 classes
+                train_target_all_with_nothing = add_nothing_class(train_target_all)
+                train_pred_all_with_nothing = add_nothing_class(train_pred_all)
+
+                # Overall weighted F1 (using 5 classes now)
                 try:
                     train_f1_weighted = f1_score(
-                        train_target_all,
-                        train_pred_all,
+                        train_target_all_with_nothing,
+                        train_pred_all_with_nothing,
                         average="weighted",
                         zero_division=0,
                     )
-                except:
+                except Exception as e:
+                    print(f"Warning: Could not calculate training weighted F1: {e}")
                     train_f1_weighted = 0.0
                 train_f1s.append(train_f1_weighted)
 
-                # Per-class F1 scores
+                # Per-class F1 scores (for 5 classes)
                 try:
                     train_f1_class = f1_score(
-                        train_target_all, train_pred_all, average=None, zero_division=0
+                        train_target_all_with_nothing, train_pred_all_with_nothing, average=None, zero_division=0
                     )
-                    for i in range(4):
+                    for i in range(num_total_classes): # Loop for 5 classes now
                         train_f1_per_class[i].append(train_f1_class[i])
-                except:
+                except Exception as e:
+                    print(f"Warning: Could not calculate training per-class F1: {e}")
                     # If there are no positive samples for a class, set F1 to 0
-                    for i in range(4):
+                    for i in range(num_total_classes): # Loop for 5 classes now
                         train_f1_per_class[i].append(0.0)
 
-                # Per-class accuracy
-                for i in range(4):
-                    class_pred = train_pred_all[:, i]
-                    class_target = train_target_all[:, i]
-                    class_acc = np.mean(class_pred == class_target) * 100
+                # Per-class accuracy (for 5 classes)
+                for i in range(num_total_classes): # Loop for 5 classes now
+                    class_pred = train_pred_all_with_nothing[:, i]
+                    class_target = train_target_all_with_nothing[:, i]
+                    class_acc = accuracy_score(class_target, class_pred) * 100 # Use sklearn accuracy
                     train_acc_per_class[i].append(class_acc)
 
                 train_acc = 100.0 * train_correct / train_total
@@ -1173,7 +1278,6 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
                         probabilities = torch.sigmoid(output)
                         predicted = (probabilities > 0.5).float()
                         scores = probabilities  # Use probabilities for ROC curves
-
                         val_total += target.numel()
                         val_correct += (predicted == target).sum().item()
 
@@ -1185,35 +1289,41 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
                 val_pred_all = np.array(val_predictions)
                 val_target_all = np.array(val_targets)
 
-                # Overall weighted F1
+                # Add the 'nothing' class column to both targets and predictions based on original 4 classes
+                val_target_all_with_nothing = add_nothing_class(val_target_all)
+                val_pred_all_with_nothing = add_nothing_class(val_pred_all)
+
+                # Overall weighted F1 (using 5 classes now)
                 try:
                     val_f1_weighted = f1_score(
-                        val_target_all,
-                        val_pred_all,
+                        val_target_all_with_nothing,
+                        val_pred_all_with_nothing,
                         average="weighted",
                         zero_division=0,
                     )
-                except:
+                except Exception as e:
+                    print(f"Warning: Could not calculate validation weighted F1: {e}")
                     val_f1_weighted = 0.0
                 val_f1s.append(val_f1_weighted)
 
-                # Per-class F1 scores
+                # Per-class F1 scores (for 5 classes)
                 try:
                     val_f1_class = f1_score(
-                        val_target_all, val_pred_all, average=None, zero_division=0
+                        val_target_all_with_nothing, val_pred_all_with_nothing, average=None, zero_division=0
                     )
-                    for i in range(4):
+                    for i in range(num_total_classes): # Loop for 5 classes now
                         val_f1_per_class[i].append(val_f1_class[i])
-                except:
+                except Exception as e:
+                    print(f"Warning: Could not calculate validation per-class F1: {e}")
                     # If there are no positive samples for a class, set F1 to 0
-                    for i in range(4):
+                    for i in range(num_total_classes): # Loop for 5 classes now
                         val_f1_per_class[i].append(0.0)
 
-                # Per-class accuracy
-                for i in range(4):
-                    class_pred = val_pred_all[:, i]
-                    class_target = val_target_all[:, i]
-                    class_acc = np.mean(class_pred == class_target) * 100
+                # Per-class accuracy (for 5 classes)
+                for i in range(num_total_classes): # Loop for 5 classes now
+                    class_pred = val_pred_all_with_nothing[:, i]
+                    class_target = val_target_all_with_nothing[:, i]
+                    class_acc = accuracy_score(class_target, class_pred) * 100 # Use sklearn accuracy
                     val_acc_per_class[i].append(class_acc)
 
                 val_acc = 100.0 * val_correct / val_total
@@ -1225,9 +1335,8 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
                 mlflow.log_metric("train_loss", avg_train_loss, step=epoch)
                 mlflow.log_metric("train_accuracy", train_acc, step=epoch)
                 mlflow.log_metric("train_f1_weighted", train_f1_weighted, step=epoch)
-
-                # Log per-class training F1 scores
-                for i, class_name in enumerate(class_names):
+                # Log per-class training F1 scores (updated loop)
+                for i, class_name in enumerate(class_names): # Now iterates 5 times
                     mlflow.log_metric(
                         f"train_f1_{class_name}", train_f1_per_class[i][-1], step=epoch
                     )
@@ -1240,9 +1349,8 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
                 mlflow.log_metric("val_loss", avg_val_loss, step=epoch)
                 mlflow.log_metric("val_accuracy", val_acc, step=epoch)
                 mlflow.log_metric("val_f1_weighted", val_f1_weighted, step=epoch)
-
-                # Log per-class validation F1 scores
-                for i, class_name in enumerate(class_names):
+                # Log per-class validation F1 scores (updated loop)
+                for i, class_name in enumerate(class_names): # Now iterates 5 times
                     mlflow.log_metric(
                         f"val_f1_{class_name}", val_f1_per_class[i][-1], step=epoch
                     )
@@ -1250,17 +1358,17 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
                         f"val_acc_{class_name}", val_acc_per_class[i][-1], step=epoch
                     )
 
-                # Print with per-class F1 scores and per-class accuracy
+                # Print with per-class F1 scores and per-class accuracy (updated loops)
                 class_f1_str = ", ".join(
                     [
-                        f"{class_names[i]}: {val_f1_per_class[i][-1]:.3f}"
-                        for i in range(4)
+                        f"{class_names[i]}: {val_f1_per_class[i][-1]:.3f}" # Loop 5 times
+                        for i in range(num_total_classes)
                     ]
                 )
                 class_acc_str = ", ".join(
                     [
-                        f"{class_names[i]}: {val_acc_per_class[i][-1]:.1f}%"
-                        for i in range(4)
+                        f"{class_names[i]}: {val_acc_per_class[i][-1]:.1f}%" # Loop 5 times
+                        for i in range(num_total_classes)
                     ]
                 )
                 print(
@@ -1272,48 +1380,51 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             # Final comprehensive evaluation
             val_predictions = np.array(val_predictions)
             val_targets = np.array(val_targets)
-            val_scores = np.array(val_scores)
+            val_scores = np.array(val_scores) # Keep original scores for ROC
 
-            # Calculate final metrics
+            # Add 'nothing' class for final metric calculation
+            val_targets_with_nothing = add_nothing_class(val_targets)
+            val_predictions_with_nothing = add_nothing_class(val_predictions)
+
+            # Calculate final metrics (using updated variables)
             try:
                 final_f1_weighted = f1_score(
-                    val_targets, val_predictions, average="weighted", zero_division=0
+                    val_targets_with_nothing, val_predictions_with_nothing, average="weighted", zero_division=0
                 )
                 final_f1_per_class = f1_score(
-                    val_targets, val_predictions, average=None, zero_division=0
+                    val_targets_with_nothing, val_predictions_with_nothing, average=None, zero_division=0
                 )
-            except:
+            except Exception as e:
+                print(f"Warning: Could not calculate final weighted/per-class F1: {e}")
                 final_f1_weighted = 0.0
-                final_f1_per_class = [0.0] * 4
+                final_f1_per_class = [0.0] * num_total_classes # Update length to 5
 
-            # Calculate final per-class accuracy
+            # Calculate final per-class accuracy (using updated variables)
             final_acc_per_class = []
-            for i in range(4):
-                class_pred = val_predictions[:, i]
-                class_target = val_targets[:, i]
-                class_acc = np.mean(class_pred == class_target) * 100
+            for i in range(num_total_classes): # Loop for 5 classes
+                class_pred = val_predictions_with_nothing[:, i]
+                class_target = val_targets_with_nothing[:, i]
+                class_acc = accuracy_score(class_target, class_pred) * 100 # Use sklearn accuracy
                 final_acc_per_class.append(class_acc)
 
             mlflow.log_metric(
                 "final_val_f1_weighted", final_f1_weighted
             )  # Log final F1
-
-            # Log per-class final F1 scores
-            for i, class_name in enumerate(class_names):
+            # Log per-class final F1 scores (updated loop)
+            for i, class_name in enumerate(class_names): # Now iterates 5 times
                 mlflow.log_metric(f"final_val_f1_{class_name}", final_f1_per_class[i])
                 mlflow.log_metric(f"final_val_acc_{class_name}", final_acc_per_class[i])
 
-            # Calculate and log classification report
+            # Calculate and log classification report (using updated variables)
             report = classification_report(
-                val_targets,
-                val_predictions,
-                target_names=class_names,
+                val_targets_with_nothing,
+                val_predictions_with_nothing,
+                target_names=class_names, # Use updated class names
                 output_dict=True,
                 zero_division=0,
             )
-
-            # Log metrics for each class (including macro F1)
-            for i, class_name in enumerate(class_names):
+            # Log metrics for each class (including macro F1) (updated loop)
+            for i, class_name in enumerate(class_names): # Now iterates 5 times
                 mlflow.log_metric(
                     f"val_precision_{class_name}", report[class_name]["precision"]
                 )
@@ -1328,9 +1439,9 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             mlflow.log_metric("val_f1_macro", report["macro avg"]["f1-score"])
             mlflow.log_metric("val_f1_weighted", report["weighted avg"]["f1-score"])
 
-            # Create and log classification report in temporary file - CORRECTED VERSION
+            # Create and log classification report in temporary file - CORRECTED VERSION (using updated variables)
             report_text = classification_report(
-                val_targets, val_predictions, target_names=class_names, zero_division=0
+                val_targets_with_nothing, val_predictions_with_nothing, target_names=class_names, zero_division=0 # Use updated variables
             )
             # Create temp file, write content, and close the file handle before logging
             tmp_report_file = tempfile.NamedTemporaryFile(
@@ -1345,19 +1456,20 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
 
             # Create and log model summary in temporary file - CORRECTED VERSION
             final_f1_per_class_str = ", ".join(
-                [f"{class_names[i]}: {final_f1_per_class[i]:.4f}" for i in range(4)]
+                [f"{class_names[i]}: {final_f1_per_class[i]:.4f}" for i in range(num_total_classes)] # Loop 5 times
             )
             final_acc_per_class_str = ", ".join(
-                [f"{class_names[i]}: {final_acc_per_class[i]:.2f}%" for i in range(4)]
+                [f"{class_names[i]}: {final_acc_per_class[i]:.2f}%" for i in range(num_total_classes)] # Loop 5 times
             )
             model_summary = f"""
             Model Architecture: {model.arch_name}
             Input Channels: {model.input_channels}
+            Input Height: {model.input_height}
+            Input Width: {model.input_width}
             Feature Output Size: {model.feature_output_size}
             Total Parameters: {total_params:,}
             Trainable Parameters: {trainable_params:,}
             Layers: {len(model.layers_config)}
-
             Training Configuration:
             - Epochs: {epochs}
             - Learning Rate: {learning_rate}
@@ -1368,7 +1480,6 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             - Final Validation Weighted F1-Score: {final_f1_weighted:.4f}
             - Final Validation Per-Class F1-Scores: {final_f1_per_class_str}
             - Final Validation Per-Class Accuracy: {final_acc_per_class_str}
-
             Class-wise Performance:
             {report_text}
             """
@@ -1382,7 +1493,7 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             os.unlink(tmp_summary_file.name)  # Delete the temporary file after logging
 
             # Create and log confusion matrices
-            cm_fig = plot_confusion_matrices(val_targets, val_predictions, class_names)
+            cm_fig = plot_confusion_matrices(val_targets_with_nothing, val_predictions_with_nothing, class_names) # Use updated variables
             tmp_cm_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
             cm_fig.savefig(tmp_cm_file.name, dpi=150, bbox_inches="tight")
             tmp_cm_file.close()  # Close the file handle
@@ -1390,8 +1501,8 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             os.unlink(tmp_cm_file.name)
             plt.close(cm_fig)
 
-            # Create and log ROC curves
-            roc_fig = plot_roc_curves(val_targets, val_scores, class_names)
+            # Create and log ROC curves (only for original 4 classes as 'nothing' is derived)
+            roc_fig = plot_roc_curves(val_targets, val_scores, class_names[:4]) # Use original 4 classes for ROC
             tmp_roc_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
             roc_fig.savefig(tmp_roc_file.name, dpi=150, bbox_inches="tight")
             tmp_roc_file.close()  # Close the file handle
@@ -1399,16 +1510,17 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             os.unlink(tmp_roc_file.name)
             plt.close(roc_fig)
 
-            # Create and log prediction examples
+            # Create and log prediction examples (including 'nothing' in plots if applicable)
             pred_examples_fig = plot_wrong_prediction_examples(
-                model, val_loader, class_names
+                model, val_loader, class_names # Pass updated class names
             )
-            tmp_pred_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
-            pred_examples_fig.savefig(tmp_pred_file.name, dpi=150, bbox_inches="tight")
-            tmp_pred_file.close()  # Close the file handle
-            mlflow.log_artifact(tmp_pred_file.name, "wrong_prediction_examples")
-            os.unlink(tmp_pred_file.name)
-            plt.close(pred_examples_fig)
+            if pred_examples_fig is not None: # Check if any wrong predictions were found
+                tmp_pred_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
+                pred_examples_fig.savefig(tmp_pred_file.name, dpi=150, bbox_inches="tight")
+                tmp_pred_file.close()  # Close the file handle
+                mlflow.log_artifact(tmp_pred_file.name, "wrong_prediction_examples")
+                os.unlink(tmp_pred_file.name)
+                plt.close(pred_examples_fig)
 
             # Create final training plot (with global F1 only) - ONLY FINAL PLOT IN training_plots
             final_main_fig = create_training_plots(
@@ -1419,7 +1531,7 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
                 train_f1_per_class,
                 val_f1_per_class,
                 epochs - 1,
-                class_names,
+                class_names, # Pass updated class names
             )
             tmp_train_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
             final_main_fig.savefig(tmp_train_file.name, dpi=150, bbox_inches="tight")
@@ -1432,7 +1544,7 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
 
             # Create final per-class F1 plot
             final_per_class_fig = create_f1_per_class_plot(
-                train_f1_per_class, val_f1_per_class, epochs - 1, class_names
+                train_f1_per_class, val_f1_per_class, epochs - 1, class_names # Pass updated class names
             )
             tmp_f1_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
             final_per_class_fig.savefig(tmp_f1_file.name, dpi=150, bbox_inches="tight")
@@ -1443,7 +1555,7 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
 
             # Create final per-class accuracy plot
             final_per_class_acc_fig = create_accuracy_per_class_plot(
-                train_acc_per_class, val_acc_per_class, epochs - 1, class_names
+                train_acc_per_class, val_acc_per_class, epochs - 1, class_names # Pass updated class names
             )
             tmp_acc_file = tempfile.NamedTemporaryFile(suffix=".png", delete=False)
             final_per_class_acc_fig.savefig(
@@ -1458,14 +1570,13 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             architecture_config = {
                 "arch_name": model.arch_name,
                 "input_channels": model.input_channels,
-                "input_height": 160,  # You might want to store these as class attributes
-                "input_width": 90,  # You might want to store these as class attributes
+                "input_height": model.input_height, # Use the stored attribute
+                "input_width": model.input_width,   # Use the stored attribute
                 "feature_output_size": model.feature_output_size,
                 "layers_config": model.layers_config,
                 "total_params": total_params,
                 "trainable_params": trainable_params,
             }
-
             # Save architecture config as JSON
             tmp_arch_file = tempfile.NamedTemporaryFile(
                 mode="w", suffix=".json", delete=False
@@ -1478,7 +1589,6 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             # Log model with input example and include architecture info
             sample_batch, _ = next(iter(train_loader))
             input_example = sample_batch[:1].numpy()
-
             mlflow.pytorch.log_model(
                 pytorch_model=model,
                 name=f"{run_name}_model",
@@ -1500,10 +1610,10 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
             print(f"Final Per-Class F1-Scores: {final_f1_per_class_str}")
             print(f"Final Per-Class Accuracy: {final_acc_per_class_str}")
             print(
-                f"Logged artifacts: training_plots (final only), f1_scores, accuracy_scores, confusion_matrices, roc_curves, prediction_examples, reports/, model_architecture.json"
+                f"Logged artifacts: training_plots (final only), f1_scores, accuracy_scores, confusion_matrices, roc_curves, wrong_prediction_examples, reports/, model_architecture.json"
             )
-
             return model
+
 
     def evaluate_model(model, test_loader):
         """
@@ -1512,7 +1622,6 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
         model.eval()
         correct = 0
         total = 0
-
         with torch.no_grad():
             for data, target in test_loader:
                 outputs = model(data)
@@ -1521,22 +1630,19 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
                 correct += (predicted == target).sum().item()
 
         accuracy = 100 * correct / total
-
         # Log evaluation metrics if MLflow is active
         if mlflow.active_run():
             mlflow.log_metric("test_accuracy", accuracy)
-
         return accuracy
+
 
     def predict_single_image(model, image_array, threshold=0.0):
         """
         Predict a single image with your trained multi-label model
-
         Args:
             model: Trained PyTorch model
             image_array: numpy array of shape (H, W) or (H, W, C)
             threshold: threshold for converting logits to binary predictions (default 0.0)
-
         Returns:
             predictions: numpy array of shape (4,) with binary values [0, 1, 0, 1]
             logits: raw model outputs before thresholding
@@ -1565,15 +1671,14 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
 
         return predictions.numpy()[0], logits.numpy()[0]  # Remove batch dimension
 
+
     def predict_batch(model, image_batch, threshold=0.0):
         """
         Predict a batch of images
-
         Args:
             model: Trained PyTorch model
             image_batch: numpy array of shape (N, H, W) or (N, H, W, 1) or (N, H, W, 3)
             threshold: threshold for converting logits to binary predictions
-
         Returns:
             predictions: numpy array of shape (N, 4) with binary values
             logits: raw model outputs before thresholding
@@ -1603,6 +1708,7 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
 
         return predictions.numpy(), logits.numpy()
 
+
     # To interpret the results:
     def interpret_predictions(
         predictions, class_names=["forward", "back", "left", "right"]
@@ -1620,10 +1726,8 @@ def _(auc, confusion_matrix, json, mlflow, nn, np, plt, roc_curve, sns, torch):
         ]
         print(f"Predicted actions: {active_actions}")
         print(f"Detailed: {result}")
-
         return result
-
-    return FlexibleCNN, train_model
+    return (FlexibleCNN,)
 
 
 @app.cell
@@ -1656,7 +1760,6 @@ def _(Dataset, np, torch):
             label = torch.FloatTensor(label)  # Keep as one-hot vector for multi-label
 
             return image, label
-
     return (CnnImageDataset,)
 
 
@@ -1675,7 +1778,7 @@ def _(
 
     cnn_train_loader = DataLoader(cnn_train_dataset, batch_size=32, shuffle=True)
     cnn_test_loader = DataLoader(cnn_test_dataset, batch_size=32, shuffle=False)
-    return cnn_test_loader, cnn_train_loader
+    return
 
 
 @app.cell
@@ -1691,21 +1794,11 @@ def _(load_dotenv, os):
     cnn_experiment_name = os.getenv(
         "MLFLOW_CNN_EXPERIMENT_NAME", "default_cnn_experiment"
     )
-    return (cnn_experiment_name,)
+    return
 
 
 @app.cell
-def _(
-    FlexibleCNN,
-    cnn_experiment_name,
-    cnn_test_loader,
-    cnn_train_loader,
-    images_height,
-    images_width,
-    mlflow,
-    os,
-    train_model,
-):
+def _(FlexibleCNN, images_height, images_width, mlflow, os):
     cnn_architectures = [
         (
             "simple_cnn",
@@ -1810,14 +1903,14 @@ def _(
         cnn_model,
         cnn_train_loader,
         cnn_test_loader,
-        epochs=20,
+        epochs=1,
         learning_rate=0.001,
         experiment_name=cnn_experiment_name,
-        run_name="not_so_simple_20_epochs_with_weights",
+        run_name="test",
         weights=cnn_weights
     )
-
     """
+
     return
 
 
@@ -1827,13 +1920,13 @@ def _(mo):
     return
 
 
-@app.cell
+@app.cell(disabled=True)
 def _():
     num_previous_frames = 5
     return (num_previous_frames,)
 
 
-@app.cell
+@app.cell(disabled=True)
 def _(pl):
     def create_df_previous_frames(df_augmented, num_previous_frames):
         # Sort by record and frame_idx to ensure proper ordering
@@ -1908,18 +2001,17 @@ def _(pl):
         # Create final DataFrame and sort
         df_result = pl.DataFrame(result_rows)
         return df_result.sort(["record", "frame_idx", "is_augmented"])
-
     return (create_df_previous_frames,)
 
 
-@app.cell
+@app.cell(disabled=True)
 def _(create_df_previous_frames, df_augmented, num_previous_frames):
     df_previous_frames = create_df_previous_frames(df_augmented, num_previous_frames)
     df_previous_frames.head()
     return (df_previous_frames,)
 
 
-@app.cell
+@app.cell(disabled=True)
 def _(df_previous_frames, np, num_previous_frames, pl):
     # Get all image columns that need to be converted
     image_columns = ["image_preprocessed"] + [
@@ -1947,7 +2039,7 @@ def _(df_previous_frames_array_image):
     return
 
 
-@app.cell
+@app.cell(disabled=True)
 def _(df_previous_frames_array_image, np, num_previous_frames, pl):
     def stack_images(row_dict, num_prev_frames):
         """Stack images along the channel dimension"""
@@ -1992,19 +2084,19 @@ def _(df_previous_frames_array_image, np, num_previous_frames, pl):
     return (df_previous_frames_array_stacked,)
 
 
-@app.cell
+@app.cell(disabled=True)
 def _(df_previous_frames_array_stacked):
     df_previous_frames_array_stacked["stacked_array_image_sequence"][0].shape
     return
 
 
-@app.cell
+@app.cell(disabled=True)
 def _(df_previous_frames_array_stacked):
     df_previous_frames_array_stacked.head()
     return
 
 
-@app.cell
+@app.cell(disabled=True)
 def _(df_previous_frames_array_stacked, train_test_split):
     temporal_cnn_df_train, temporal_cnn_df_test = train_test_split(
         df_previous_frames_array_stacked, test_size=0.2, random_state=42
@@ -2032,19 +2124,19 @@ def _(df_previous_frames_array_stacked, train_test_split):
     )
 
 
-@app.cell
+@app.cell(disabled=True)
 def _(temporal_cnn_X_test):
     temporal_cnn_X_test.head()
     return
 
 
-@app.cell
+@app.cell(disabled=True)
 def _(temporal_cnn_y_test):
     temporal_cnn_y_test.head()
     return
 
 
-@app.cell
+@app.cell(disabled=True)
 def _(temporal_cnn_X_train):
     temporal_sample_image = temporal_cnn_X_train[
         temporal_cnn_X_train.columns[0]
@@ -2053,7 +2145,7 @@ def _(temporal_cnn_X_train):
     return
 
 
-@app.cell
+@app.cell(disabled=True)
 def _(Dataset, np, torch):
     class TemporalCnnImageDataset(Dataset):
         def __init__(self, images_df, labels_df):
@@ -2086,11 +2178,10 @@ def _(Dataset, np, torch):
             label = torch.FloatTensor(label)  # Keep as one-hot vector for multi-label
 
             return image, label
-
     return (TemporalCnnImageDataset,)
 
 
-@app.cell
+@app.cell(disabled=True)
 def _(
     DataLoader,
     TemporalCnnImageDataset,
@@ -2125,7 +2216,7 @@ def _(load_dotenv, os):
     return
 
 
-@app.cell
+@app.cell(disabled=True)
 def _(
     FlexibleCNN,
     images_height,
@@ -2214,18 +2305,19 @@ def _(
 
     temporal_cnn_weights = [1.5, 1.0, 2.0, 2.0]  # Forward / Back / Left / Right
 
-    """
+    """"
     train_model(
         temporal_cnn_model,
         temporal_cnn_train_loader,
         temporal_cnn_test_loader,
-        epochs=20,
+        epochs=1,
         learning_rate=0.001,
         experiment_name=temporal_cnn_experiment_name,
-        run_name="not_so_simple_20_epochs_with_weights",
+        run_name="test",
         weights=temporal_cnn_weights
     )
     """
+
     return
 
 
