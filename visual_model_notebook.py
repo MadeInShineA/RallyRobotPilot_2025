@@ -1771,48 +1771,48 @@ def _(pl):
             ).sort("frame_idx")
         
             # Process augmented frames (skip first num_previous_frames)
-            for i in range(len(df_record_augmented)):
-                # Skip the first num_previous_frames since they can't have all previous frames
-                if i < num_previous_frames:
-                    continue
-                
-                current_row = df_record_augmented.row(i, named=True)
+            for current_idx in range(num_previous_frames, len(df_record_augmented)):
+                current_row = df_record_augmented.row(current_idx, named=True)
+                current_frame = current_row["frame_idx"]
             
                 new_row = current_row.copy()
             
                 for prev_frame in range(1, num_previous_frames + 1):
-                    prev_idx = i - prev_frame
-                    prev_row = df_record_augmented.row(prev_idx, named=True)
-                
-                    # Add only the image and control columns from the previous augmented frame
-                    new_row[f"image_preprocessed_prev_{prev_frame}"] = prev_row["image_preprocessed"]
-                    new_row[f"forward_prev_{prev_frame}"] = prev_row["forward"]
-                    new_row[f"back_prev_{prev_frame}"] = prev_row["back"]
-                    new_row[f"left_prev_{prev_frame}"] = prev_row["left"]
-                    new_row[f"right_prev_{prev_frame}"] = prev_row["right"]
+                    prev_frame_idx = current_frame - prev_frame
+                    prev_rows = df_record_augmented.filter(pl.col("frame_idx") == prev_frame_idx)
+                    if len(prev_rows) > 0:
+                        prev_row = prev_rows.row(0, named=True)
+                        # Add only the image and control columns from the previous augmented frame
+                        new_row[f"image_preprocessed_prev_{prev_frame}"] = prev_row["image_preprocessed"]
+                        new_row[f"forward_prev_{prev_frame}"] = prev_row["forward"]
+                        new_row[f"back_prev_{prev_frame}"] = prev_row["back"]
+                        new_row[f"left_prev_{prev_frame}"] = prev_row["left"]
+                        new_row[f"right_prev_{prev_frame}"] = prev_row["right"]
+                    else:
+                        new_row[f"image_preprocessed_prev_{prev_frame}"] = None
             
                 result_rows.append(new_row)
         
             # Process original (non-augmented) frames (skip first num_previous_frames)
-            for i in range(len(df_record_original)):
-                # Skip the first num_previous_frames since they can't have all previous frames
-                if i < num_previous_frames:
-                    continue
-                
-                current_row = df_record_original.row(i, named=True)
+            for current_idx in range(num_previous_frames, len(df_record_original)):
+                current_row = df_record_original.row(current_idx, named=True)
+                current_frame = current_row["frame_idx"]
             
                 new_row = current_row.copy()
             
                 for prev_frame in range(1, num_previous_frames + 1):
-                    prev_idx = i - prev_frame
-                    prev_row = df_record_original.row(prev_idx, named=True)
-                
-                    # Add only the image and control columns from the previous original frame
-                    new_row[f"image_preprocessed_prev_{prev_frame}"] = prev_row["image_preprocessed"]
-                    new_row[f"forward_prev_{prev_frame}"] = prev_row["forward"]
-                    new_row[f"back_prev_{prev_frame}"] = prev_row["back"]
-                    new_row[f"left_prev_{prev_frame}"] = prev_row["left"]
-                    new_row[f"right_prev_{prev_frame}"] = prev_row["right"]
+                    prev_frame_idx = current_frame - prev_frame
+                    prev_rows = df_record_original.filter(pl.col("frame_idx") == prev_frame_idx)
+                    if len(prev_rows) > 0:
+                        prev_row = prev_rows.row(0, named=True)
+                        # Add only the image and control columns from the previous original frame
+                        new_row[f"image_preprocessed_prev_{prev_frame}"] = prev_row["image_preprocessed"]
+                        new_row[f"forward_prev_{prev_frame}"] = prev_row["forward"]
+                        new_row[f"back_prev_{prev_frame}"] = prev_row["back"]
+                        new_row[f"left_prev_{prev_frame}"] = prev_row["left"]
+                        new_row[f"right_prev_{prev_frame}"] = prev_row["right"]
+                    else:
+                        new_row[f"image_preprocessed_prev_{prev_frame}"] = None
             
                 result_rows.append(new_row)
     
