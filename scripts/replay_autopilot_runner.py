@@ -20,48 +20,43 @@ The frames.json should contain a list of frame objects with 'input' arrays: [{"i
 
 
 class ReplayAutopilot:
-    """Simple autopilot that executes action sequences"""
+    """Autopilot that replays positions, angles, and speeds directly"""
 
-    def __init__(self, action_sequence):
-        self.action_sequence = action_sequence
+    def __init__(self, position_sequence, angle_sequence, speed_sequence):
+        self.position_sequence = position_sequence
+        self.angle_sequence = angle_sequence
+        self.speed_sequence = speed_sequence
         self.current_action_index = 0
         self.is_running = False
+        self.car = None  # Will be set by ReplayProcessor
 
     def start(self):
         self.is_running = True
         self.current_action_index = 0
 
     def update(self, sensing_data):
-        if not self.is_running:
+        if not self.is_running or not self.car:
             return
 
-        if self.current_action_index < len(self.action_sequence):
-            action = self.action_sequence[self.current_action_index]
-            self._execute_action(action)
+        if self.current_action_index < len(self.position_sequence):
+            # Set car state directly from replay data
+            self.car.position = ursina.Vec3(*self.position_sequence[self.current_action_index])
+            self.car.rotation_y = self.angle_sequence[self.current_action_index]
+            self.car.speed = self.speed_sequence[self.current_action_index]
             self.current_action_index += 1
         else:
-            # Release all keys
-            held_keys["w"] = False
-            held_keys["s"] = False
-            held_keys["a"] = False
-            held_keys["d"] = False
             self.is_running = False
-
-    def _execute_action(self, action):
-        held_keys["w"] = bool(action[0])
-        held_keys["s"] = bool(action[1])
-        held_keys["a"] = bool(action[2])
-        held_keys["d"] = bool(action[3])
 
 
 class ReplayProcessor:
-    """Simple processor for replay autopilot"""
+    """Processor for replay autopilot that sets positions directly"""
 
-    def __init__(self, action_sequence):
-        self.autopilot = ReplayAutopilot(action_sequence)
+    def __init__(self, position_sequence, angle_sequence, speed_sequence):
+        self.autopilot = ReplayAutopilot(position_sequence, angle_sequence, speed_sequence)
         self.car = None
 
     def start_evaluation(self):
+        self.autopilot.car = self.car  # Pass car reference to autopilot
         self.autopilot.start()
         if self.car:
             self.car.start_record()
@@ -127,34 +122,39 @@ def main():
         print(f"Error: Frames file '{frames_file}' not found")
         sys.exit(1)
 
-    # Load frames and extract action sequence
+    # Load frames and extract sequences
     with open(frames_file, "r") as f:
         frames = json.load(f)
 
-    action_sequence = []
+    position_sequence = []
+    angle_sequence = []
+    speed_sequence = []
     initial_position = None
     initial_angle = None
     initial_speed = None
 
     for frame in frames:
-        if "input" in frame:
-            action_sequence.append(tuple(frame["input"]))
-        # Get initial state from first frame
-        if initial_position is None and "position" in frame:
+        if "position" in frame:
             pos = frame["position"]
             if isinstance(pos, str):
                 pos = json.loads(pos)
-            initial_position = pos
-        if initial_angle is None and "angle" in frame:
-            initial_angle = frame["angle"]
-        if initial_speed is None and "speed" in frame:
-            initial_speed = frame["speed"]
+            position_sequence.append(pos)
+            if initial_position is None:
+                initial_position = pos
+        if "angle" in frame:
+            angle_sequence.append(frame["angle"])
+            if initial_angle is None:
+                initial_angle = frame["angle"]
+        if "speed" in frame:
+            speed_sequence.append(frame["speed"])
+            if initial_speed is None:
+                initial_speed = frame["speed"]
 
-    if not action_sequence:
-        print("Error: No actions found in frames file")
+    if not position_sequence:
+        print("Error: No positions found in frames file")
         sys.exit(1)
 
-    print(f"Loaded {len(action_sequence)} actions from {frames_file}")
+    print(f"Loaded {len(position_sequence)} frames from {frames_file}")
 
     # Determine track metadata path
     if "/" in track_name:
@@ -163,7 +163,7 @@ def main():
         track_metadata = f"{track_name}/track_metadata.json"
 
     # Create the replay processor
-    replay_processor = ReplayProcessor(action_sequence)
+    replay_processor = ReplayProcessor(position_sequence, angle_sequence, speed_sequence)
 
     # Prepare the game
     app, car = prepare_game_app(track_metadata)

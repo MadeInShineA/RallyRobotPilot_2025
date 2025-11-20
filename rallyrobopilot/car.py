@@ -800,10 +800,10 @@ class Car(Entity):
                 print(f"Segment {i} (checkpoint {cp}) saved to {segment_file}")
 
             # Rename images
-            image_files = glob.glob(f"{self.record_dir}/images/*.png*")
+            image_files = glob.glob(f"{self.record_dir}/images/*.jpg*")
             for f in image_files:
-                if ".png-" in f:
-                    base = f.split(".png-")[0] + ".png"
+                if ".jpg-" in f:
+                    base = f.split(".jpg-")[0] + ".jpg"
                     os.rename(f, base)
 
     def save_frame(self):
@@ -846,7 +846,7 @@ class Car(Entity):
         self.frame_idx += 1
         if not self.is_genetic_car:
             application.base.screenshot(
-                f"{self.record_dir}/images/frame_{self.frame_idx - 1}.png"
+                f"{self.record_dir}/images/frame_{self.frame_idx - 1}.jpg"
             )
 
     def animate_text(self, text, top=1.2, bottom=0.6):
