@@ -249,20 +249,13 @@ class GeneticAlgorithm:
                 self.initial_speed = 0
                 self.initial_position = [0, 0, 0]
 
-        # Extend base actions to 1.5 times length with [0, 0, 0, 0]
+        # Extend base actions to 1.5 times length with [1, 0, 0, 0]
         len_base = len(base_actions)
         extended_len = int(len_base * 1.5)
-        extended_actions = base_actions + [[0, 0, 0, 0]] * (extended_len - len_base)
+        extended_actions = base_actions + [[1, 0, 0, 0]] * (extended_len - len_base)
 
-        # Play the extended actions in the game to get the trajectory
-        print("Playing extended base actions in the game to get trajectory...")
-        temp_population = [extended_actions]
-        self.population = temp_population
-        self._evaluate_population_in_game(generation=0)
-        self.original_positions = (
-            self.individual_positions[0] if self.individual_positions else []
-        )
-        self.original_angles = []  # Angles not saved in trajectory, can load from record if needed
+        # Load original positions from segment file instead of playing
+        self._load_original_data()
 
         # All individuals are mutations of extended actions
         population = [
@@ -771,7 +764,7 @@ class GeneticAlgorithm:
                         traj_x,
                         traj_z,
                         "blue",
-                        linewidth=4,
+                        linewidth=3,
                         label=f"Overall Best Individual ({overall_best_inputs} frames)",
                         alpha=0.9,
                         zorder=3,
@@ -779,7 +772,7 @@ class GeneticAlgorithm:
                 else:
                     # Plot other generation bests in light gray
                     ax1.plot(
-                        traj_x, traj_z, "lightgray", linewidth=2, alpha=0.5, zorder=1
+                        traj_x, traj_z, "lightgray", linewidth=1, alpha=0.4, zorder=1
                     )
 
         # Plot original trajectory (from initial segment data)
@@ -836,7 +829,7 @@ class GeneticAlgorithm:
         ax1.set_xlabel("X Position", fontsize=12)
         ax1.set_ylabel("Z Position", fontsize=12)
         ax1.set_title(
-            "Trajectory Evolution: Original vs All Generation Bests",
+            f"Trajectory Evolution: Original vs All Generation Bests",
             fontsize=14,
             fontweight="bold",
         )
@@ -854,15 +847,15 @@ class GeneticAlgorithm:
                 [0],
                 [0],
                 color="lightgray",
-                linewidth=2,
-                alpha=0.5,
+                linewidth=1,
+                alpha=0.4,
                 label="Generation Bests",
             ),
             Line2D(
                 [0],
                 [0],
                 color="blue",
-                linewidth=4,
+                linewidth=3,
                 label=f"Overall Best ({overall_best_inputs} frames)",
             ),
         ]

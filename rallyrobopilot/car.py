@@ -492,6 +492,36 @@ class Car(Entity):
         elif not held_keys["r"]:
             self.r_pressed = False
 
+        # Update autopilot if present (before movement to set controls for this frame)
+        if hasattr(self, "autopilot") and self.autopilot:
+            snapshot = SensingSnapshot()
+            snapshot.current_controls = (
+                held_keys["w"] or held_keys["up arrow"],
+                held_keys["s"] or held_keys["down arrow"],
+                held_keys["a"] or held_keys["left arrow"],
+                held_keys["d"] or held_keys["right arrow"],
+            )
+            snapshot.car_position = self.world_position
+            snapshot.car_speed = self.speed
+            snapshot.car_angle = self.rotation_y
+            snapshot.raycast_distances = (
+                self.multiray_sensor.collect_sensor_values()
+                if self.multiray_sensor
+                else []
+            )
+            snapshot.collision_counter = self.collision_counter
+            if self.checkpoint_handler:
+                snapshot.checkpoints_passed = len(
+                    self.checkpoint_handler.passed_checkpoints
+                )
+                snapshot.total_checkpoints = len(
+                    self.checkpoint_handler.lap_checkpoints
+                )
+            else:
+                snapshot.checkpoints_passed = 0
+                snapshot.total_checkpoints = 0
+            self.autopilot.update(snapshot)
+
         #   Process inputs & update speed
         if held_keys[self.controls[0]] or held_keys["up arrow"]:
             self.speed += self.acceleration * time.dt
@@ -630,36 +660,6 @@ class Car(Entity):
         if self.checkpoint_handler:
             self.checkpoint_handler.update()
             self.checkpoint_handler.check_passed_checkpoints(self.position)
-
-        # Update autopilot if present
-        if hasattr(self, "autopilot") and self.autopilot:
-            snapshot = SensingSnapshot()
-            snapshot.current_controls = (
-                held_keys["w"] or held_keys["up arrow"],
-                held_keys["s"] or held_keys["down arrow"],
-                held_keys["a"] or held_keys["left arrow"],
-                held_keys["d"] or held_keys["right arrow"],
-            )
-            snapshot.car_position = self.world_position
-            snapshot.car_speed = self.speed
-            snapshot.car_angle = self.rotation_y
-            snapshot.raycast_distances = (
-                self.multiray_sensor.collect_sensor_values()
-                if self.multiray_sensor
-                else []
-            )
-            snapshot.collision_counter = self.collision_counter
-            if self.checkpoint_handler:
-                snapshot.checkpoints_passed = len(
-                    self.checkpoint_handler.passed_checkpoints
-                )
-                snapshot.total_checkpoints = len(
-                    self.checkpoint_handler.lap_checkpoints
-                )
-            else:
-                snapshot.checkpoints_passed = 0
-                snapshot.total_checkpoints = 0
-            self.autopilot.update(snapshot)
 
         # Record keys if recording
         if self.recording:
