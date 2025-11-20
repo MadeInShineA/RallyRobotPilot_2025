@@ -57,6 +57,8 @@ class DataCollectionUI(QtWidgets.QMainWindow):
             self.AutopilotButton.setText(
                 "AutoPilot:\n" + ("ON" if self.autopiloting else "OFF")
             )
+            if self.autopiloting and not self.recording:
+                self.toggleRecord()
 
         self.AutopilotButton.clicked.connect(toggle_autopilot)
         self.message_processing_callback = message_processing_callback
@@ -77,7 +79,7 @@ class DataCollectionUI(QtWidgets.QMainWindow):
 
     def collectMsg(self, msg):
         if self.recording:
-            if not self.saveImgCheckBox.isChecked():
+            if not self.saveImgCheckBox.isChecked() and not self.autopiloting:
                 msg.image = None
 
             self.recorded_data.append(msg)

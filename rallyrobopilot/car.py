@@ -340,7 +340,7 @@ class Car(Entity):
                 self.velocity_y -= 50 * time.dt
 
     def update(self):
-        time.dt = 0.05
+        time.dt = 0.03
         # Exit if esc pressed.
         if held_keys["escape"]:
             quit()
