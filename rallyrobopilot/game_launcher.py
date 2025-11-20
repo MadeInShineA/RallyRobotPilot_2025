@@ -6,8 +6,8 @@ def prepare_game_app(track_name="SimpleTrack"):
     from ursina import window, Ursina
 
     # Create Window
-    window.vsync = True  # Set to false to uncap FPS limit of 60
-    app = Ursina(size=(540, 960))
+    window.vsync = False  # Uncapped FPS
+    app = Ursina(size=(320, 256))
     print("Asset folder")
     print(application.asset_folder)
 
@@ -45,7 +45,6 @@ def prepare_game_app(track_name="SimpleTrack"):
 
     # load assets
     # SimpleTrack SlightlyHarder NotSoSImpleTrack
-    track_name = "SlightlyHarder"
     track = Track(track_name)
     print("loading assets after track creation")
     track.load_assets(global_models, global_texs)
@@ -58,6 +57,7 @@ def prepare_game_app(track_name="SimpleTrack"):
 
     car.multiray_sensor = MultiRaySensor(car, 15, 90)
     car.multiray_sensor.enable()
+    # car.multiray_sensor.set_enabled_rays(False)
 
     # Lighting + shadows
     sun = SunLight(direction=(-0.7, -0.9, 0.5), resolution=3072, car=car)
@@ -83,3 +83,4 @@ def prepare_game_app(track_name="SimpleTrack"):
     track.played = True
 
     return app, car
+

@@ -3,3 +3,4 @@ __pycache__/
 records_csv/
 model/
 image_records/*.npz
+.env
