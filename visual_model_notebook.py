@@ -35,11 +35,11 @@ def _():
         roc_curve,
         auc,
         accuracy_score,
+        f1_score
     )
     import tempfile
     from torch.utils.data import Dataset, DataLoader
     import matplotlib.gridspec as gridspec
-
     return (
         DataLoader,
         Dataset,
@@ -48,6 +48,7 @@ def _():
         auc,
         classification_report,
         confusion_matrix,
+        f1_score,
         gridspec,
         json,
         load_dotenv,
@@ -163,9 +164,7 @@ def _(df):
 
 @app.cell
 def _(mo):
-    mo.md(
-        r"""### Clean the first frames of each record when nothing happens (all inputs are 0)"""
-    )
+    mo.md(r"""### Clean the first frames of each record when nothing happens (all inputs are 0)""")
     return
 
 
@@ -246,7 +245,6 @@ def _(Image):
             size, Image.Resampling.LANCZOS
         )  # Resize to exact dimensions
         return image
-
     return (preprocess_image,)
 
 
@@ -266,12 +264,10 @@ def _(df_cleaned, pl, preprocess_image):
     return df_cleaned_pil_preprocessed, images_height, images_width
 
 
-app._unparsable_cell(
-    r"""
-        df_cleaned_pil_preprocessed.head()
-    """,
-    name="_",
-)
+@app.cell
+def _(df_cleaned_pil_preprocessed):
+    df_cleaned_pil_preprocessed.head()
+    return
 
 
 @app.cell
@@ -312,7 +308,6 @@ def _(pl, sns):
             hue="control",
             palette=["green", "red", "blue", "orange"],
         )
-
     return (plot_controls,)
 
 
@@ -385,7 +380,6 @@ def _(pl, plt, sns):
 
         plt.tight_layout()
         return ax
-
     return (plot_usage,)
 
 
@@ -604,9 +598,6 @@ def _(
             for layer_type, params in layer_configs:
                 if layer_type == "conv":
                     conv_params = params.copy()
-                    conv_params["in_channels"] = in_channels
-                    modules.append(nn.Conv2d(**conv_params))
-                if "out_channels" in params:
                     conv_params["in_channels"] = in_channels
                     modules.append(nn.Conv2d(**conv_params))
                     if "out_channels" in params:
@@ -838,249 +829,6 @@ def _(
         ax.grid(True)
         return fig
 
-    def plot_prediction_examples(model, test_loader, class_names, num_examples=4):
-        """Visualize prediction examples with bar plots under images - Updated for N classes"""
-        model.eval()
-        images, true_labels, pred_labels, pred_scores = [], [], [], []
-        with torch.no_grad():
-            for data, target in test_loader:
-                outputs = model(data)
-                predictions = (torch.sigmoid(outputs) > 0.5).float()
-                scores = torch.sigmoid(outputs)  # Convert logits to probabilities
-                # Store examples
-                images.extend(data.cpu().numpy()[:2])
-                true_labels.extend(target.cpu().numpy()[:2])
-                pred_labels.extend(predictions.cpu().numpy()[:2])
-                pred_scores.extend(scores.cpu().numpy()[:2])
-                if len(images) >= num_examples:
-                    break
-
-        # Ensure labels/preds/scores have 'nothing' column if needed
-        # This function assumes the class_names list passed in already includes 'nothing'
-        # and the model outputs are for the original 4 classes.
-        # We add 'nothing' here based on the original 4 classes in the labels/preds/scores.
-        true_labels_np = np.array(true_labels)
-        pred_labels_np = np.array(pred_labels)
-        pred_scores_np = np.array(pred_scores)
-
-        # Only add 'nothing' if class_names indicates it should be there (i.e., length 5)
-        if len(class_names) == 5:
-            true_labels_np = add_nothing_class(true_labels_np)
-            pred_labels_np = add_nothing_class(pred_labels_np)
-            # For scores, the 'nothing' probability is 1 if all original are 0, else 0 (or derive from model somehow)
-            # For simplicity here, we'll just add a column of zeros to scores, as the model doesn't predict 'nothing' directly.
-            # If you want the model to predict 'nothing' probability, you'd need to modify the model.
-            # For now, we calculate 'nothing' only for labels/preds for metrics.
-            # Let's just pass the original scores to the bar plot for the original classes.
-            # We need to adjust the plotting loop to handle the score array correctly.
-            scores_for_plot = pred_scores_np  # Use original scores for plotting
-            if scores_for_plot.shape[1] < len(
-                class_names
-            ):  # If scores array is missing 'nothing'
-                # Add a column of zeros or calculate 'nothing' score (e.g., 1 - max of others, or 1 if all others < 0.5)
-                # For now, adding zeros is simplest if the model doesn't predict 'nothing'
-                # Let's assume the model scores are for 4 classes, and we add a 'nothing' score column.
-                # A simple 'nothing' score could be: prob_nothing = 1 if all original probs < 0.5 else 0
-                # Or prob_nothing = 1 - max(original_probs)
-                # Let's use prob_nothing = 1 - max(original_probs) for a continuous score.
-                max_probs = np.max(
-                    pred_scores_np, axis=1, keepdims=True
-                )  # Shape (N, 1)
-                prob_nothing = 1 - max_probs  # Shape (N, 1)
-                scores_for_plot = np.concatenate(
-                    [pred_scores_np, prob_nothing], axis=1
-                )  # Shape (N, 5)
-        else:
-            scores_for_plot = (
-                pred_scores_np  # Use original scores if 'nothing' not expected
-            )
-
-        # Create figure with custom grid for image + bar plot layout
-        fig = plt.figure(figsize=(12, 10))
-        gs = gridspec.GridSpec(
-            num_examples, 1, height_ratios=[3] * num_examples, hspace=0.4
-        )
-
-        # Use a color map or list that can handle the number of classes
-        num_plot_classes = len(class_names)
-        colors = plt.cm.get_cmap("tab10", num_plot_classes)(range(num_plot_classes))
-        # If you have a specific color list, ensure it's long enough
-        # colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"] # Example for 5 classes
-
-        for i in range(min(num_examples, len(images))):
-            img = images[i][0]  # Grayscale channel
-            true_label = true_labels_np[i]  # Use potentially updated labels
-            pred_label = pred_labels_np[i]  # Use potentially updated preds
-            pred_score = scores_for_plot[i]  # Use potentially updated scores
-
-            # Create sub-grid for each example (image + bar plot)
-            sub_gs = gridspec.GridSpecFromSubplotSpec(
-                2, 1, gs[i], height_ratios=[2, 1], hspace=0.3
-            )
-
-            # Image subplot
-            ax_img = fig.add_subplot(sub_gs[0])
-            ax_img.imshow(img, cmap="gray")
-            # Create title with true and predicted labels
-            true_actions = [
-                class_names[j] for j, val in enumerate(true_label) if val > 0
-            ]
-            pred_actions = [
-                class_names[j] for j, val in enumerate(pred_label) if val > 0
-            ]
-            if not true_actions:
-                true_actions = [
-                    "none"
-                ]  # Or class_names[-1] if always including 'nothing'
-            if not pred_actions:
-                pred_actions = [
-                    "none"
-                ]  # Or class_names[-1] if always including 'nothing'
-            title = f"True: {', '.join(true_actions)} | Pred: {', '.join(pred_actions)}"
-            ax_img.set_title(title, fontsize=10)
-            ax_img.axis("off")
-
-            # Bar plot subplot
-            ax_bar = fig.add_subplot(sub_gs[1])
-            bars = ax_bar.bar(
-                class_names,
-                pred_score,
-                color=colors,
-                alpha=0.7,
-            )
-            ax_bar.set_ylim(0, 1)
-            ax_bar.set_ylabel("Prob", fontsize=8)
-            ax_bar.tick_params(axis="x", labelsize=8)
-            ax_bar.tick_params(axis="y", labelsize=8)
-            # Add value labels on bars
-            for j, (bar, score) in enumerate(zip(bars, pred_score)):
-                ax_bar.text(
-                    bar.get_x() + bar.get_width() / 2.0,
-                    bar.get_height() + 0.02,
-                    f"{score:.2f}",
-                    ha="center",
-                    va="bottom",
-                    fontsize=7,
-                )
-            # Add grid for better readability
-            ax_bar.grid(axis="y", alpha=0.3, linestyle="--")
-
-        plt.tight_layout()
-        return fig
-
-    def plot_wrong_prediction_examples(model, test_loader, class_names, num_examples=4):
-        """
-        Visualize only false prediction examples (where any class is mispredicted).
-        For multi-label classification, a prediction is considered false if
-        predicted vector != true vector.
-        """
-        model.eval()
-        images, true_labels, pred_labels, pred_scores = [], [], [], []
-        with torch.no_grad():
-            for data, target in test_loader:
-                outputs = model(data)
-                probabilities = torch.sigmoid(outputs)
-                predictions = (probabilities > 0.5).float()
-                # Convert to numpy for comparison
-                pred_np = predictions.cpu().numpy()
-                target_np = target.cpu().numpy()
-                data_np = data.cpu().numpy()
-
-                # Find indices where prediction != target (any class differs)
-                mismatches = np.any(pred_np != target_np, axis=1)
-
-                # Collect only the false examples
-                for i in range(len(mismatches)):
-                    if mismatches[i] and len(images) < num_examples:
-                        images.append(data_np[i][0])  # Grayscale channel
-                        true_labels.append(target_np[i])
-                        pred_labels.append(pred_np[i])
-                        pred_scores.append(probabilities[i].cpu().numpy())
-
-                if len(images) >= num_examples:
-                    break
-
-        if len(images) == 0:
-            print("No false predictions found in the provided data.")
-            return None
-
-        # Ensure labels/preds/scores have 'nothing' column if needed
-        true_labels_np = np.array(true_labels)
-        pred_labels_np = np.array(pred_labels)
-        pred_scores_np = np.array(pred_scores)
-
-        if len(class_names) == 5:
-            true_labels_np = add_nothing_class(true_labels_np)
-            pred_labels_np = add_nothing_class(pred_labels_np)
-            # Similar logic for scores as in plot_prediction_examples if needed
-            max_probs = np.max(pred_scores_np, axis=1, keepdims=True)  # Shape (N, 1)
-            prob_nothing = 1 - max_probs  # Shape (N, 1)
-            scores_for_plot = np.concatenate(
-                [pred_scores_np, prob_nothing], axis=1
-            )  # Shape (N, 5)
-        else:
-            scores_for_plot = pred_scores_np
-
-        # Create figure
-        fig = plt.figure(figsize=(12, 3 * len(images)))
-        gs = gridspec.GridSpec(len(images), 1, hspace=0.4)
-
-        # Use a color map or list that can handle the number of classes
-        num_plot_classes = len(class_names)
-        colors = plt.cm.get_cmap("tab10", num_plot_classes)(range(num_plot_classes))
-        # If you have a specific color list, ensure it's long enough
-        # colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"] # Example for 5 classes
-
-        for i in range(len(images)):
-            img = images[i]
-            true_label = true_labels_np[i]  # Use potentially updated labels
-            pred_label = pred_labels_np[i]  # Use potentially updated preds
-            pred_score = scores_for_plot[i]  # Use potentially updated scores
-
-            # Sub-grid: image + bar plot
-            sub_gs = gridspec.GridSpecFromSubplotSpec(
-                2, 1, gs[i], height_ratios=[2, 1], hspace=0.3
-            )
-
-            # Image subplot
-            ax_img = fig.add_subplot(sub_gs[0])
-            ax_img.imshow(img, cmap="gray")
-            true_actions = [
-                class_names[j] for j, val in enumerate(true_label) if val > 0
-            ] or ["none"]  # Or class_names[-1] if always including 'nothing'
-            pred_actions = [
-                class_names[j] for j, val in enumerate(pred_label) if val > 0
-            ] or ["none"]  # Or class_names[-1] if always including 'nothing'
-            title = f"True: {', '.join(true_actions)} | Pred: {', '.join(pred_actions)}"
-            ax_img.set_title(title, fontsize=10, color="red")  # Red to highlight error
-            ax_img.axis("off")
-
-            # Bar plot subplot
-            ax_bar = fig.add_subplot(sub_gs[1])
-            bars = ax_bar.bar(
-                class_names,
-                pred_score,
-                color=colors,
-                alpha=0.7,
-            )
-            ax_bar.set_ylim(0, 1)
-            ax_bar.set_ylabel("Prob", fontsize=8)
-            ax_bar.tick_params(axis="x", labelsize=8)
-            ax_bar.tick_params(axis="y", labelsize=8)
-            ax_bar.grid(axis="y", alpha=0.3, linestyle="--")
-            # Add score labels on bars
-            for bar, score in zip(bars, pred_score):
-                ax_bar.text(
-                    bar.get_x() + bar.get_width() / 2.0,
-                    bar.get_height() + 0.02,
-                    f"{score:.2f}",
-                    ha="center",
-                    va="bottom",
-                    fontsize=7,
-                )
-
-        plt.tight_layout()
-        return fig
 
     def create_accuracy_per_class_plot(
         train_acc_per_class, val_acc_per_class, epoch, class_names
@@ -1130,6 +878,7 @@ def _(
         plt.tight_layout()
         return fig
 
+
     def train_model(
         model,
         train_loader,
@@ -1139,16 +888,29 @@ def _(
         experiment_name="cnn_experiment",
         run_name=None,
         weights=None,
+        # New parameter to specify device
+        device=None
     ):
         """
-        Enhanced training with comprehensive MLflow logging and graphics including weighted F1-score
+        Enhanced training with comprehensive MLflow logging and graphics including weighted F1-score.
+        Now supports training on CPU or CUDA GPU.
         """
+        # Determine the device to use
+        if device is None:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            print(f"No device specified, using: {device}")
+        else:
+            device = torch.device(device)
+            print(f"Training on specified device: {device}")
+
+        # --- Ensure model is on the correct device ---
+        model = model.to(device)
+
         # Set up MLflow
         mlflow.set_experiment(experiment_name)
         if run_name is None:
             timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
             run_name = f"{model.arch_name}_lr{learning_rate}_ep{epochs}_{timestamp}"
-
         with mlflow.start_run(run_name=run_name):
             # Log comprehensive parameters
             mlflow.log_param("learning_rate", learning_rate)
@@ -1161,6 +923,7 @@ def _(
             mlflow.log_param("batch_size", train_loader.batch_size)
             mlflow.log_param("optimizer", "Adam")
             mlflow.log_param("loss_function", "BCEWithLogitsLoss")
+            mlflow.log_param("device", str(device)) # Log the device used
 
             # Model parameters
             total_params = sum(p.numel() for p in model.parameters())
@@ -1171,23 +934,22 @@ def _(
             mlflow.log_param("trainable_parameters", trainable_params)
 
             optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
-
             if weights is not None:
                 if len(weights) != 4:  # Assuming 4 classes initially
                     raise ValueError(
                         f"Expected 4 weights for 4 classes, got {len(weights)}"
                     )
-                # Convert weights to tensor
-                pos_weights = torch.tensor(weights, dtype=torch.float32)
+                # Convert weights to tensor and move to device
+                pos_weights = torch.tensor(weights, dtype=torch.float32).to(device)
                 # Create the loss function with pos_weight
                 criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weights)
                 print(
-                    f"Using weighted BCEWithLogitsLoss with pos_weights: {pos_weights}"
+                    f"Using weighted BCEWithLogitsLoss with pos_weights: {pos_weights} on {device}"
                 )
             else:
                 # Default behavior if no weights provided
                 criterion = nn.BCEWithLogitsLoss()
-                print("Using standard BCEWithLogitsLoss (no weights).")
+                print(f"Using standard BCEWithLogitsLoss (no weights) on {device}.")
 
             # Track metrics for plotting - ADD F1 scores
             train_losses, val_losses = [], []
@@ -1224,33 +986,32 @@ def _(
                 train_correct = 0
                 train_total = 0
                 train_pred_list, train_target_list = [], []
-
                 for batch_idx, (data, target) in enumerate(train_loader):
+                    # --- Move data and target to the device ---
+                    data, target = data.to(device), target.to(device)
+
                     optimizer.zero_grad()
                     output = model(data)
                     loss = criterion(output, target)
                     loss.backward()
                     optimizer.step()
                     train_loss += loss.item()
-
                     # Use sigmoid probabilities with 0.5 threshold (like original)
                     probabilities = torch.sigmoid(output)
                     predicted = (probabilities > 0.5).float()
-                    train_total += target.numel()
+                    train_total += target.numel() # Note: numel() considers batch size * num_classes
                     train_correct += (predicted == target).sum().item()
-
                     # Store predictions and targets for F1 calculation (original 4 classes)
+                    # Move tensors back to CPU for numpy operations
                     train_pred_list.append(predicted.cpu().numpy())
                     train_target_list.append(target.cpu().numpy())
 
                 # Calculate training metrics
                 train_pred_all = np.vstack(train_pred_list)
                 train_target_all = np.vstack(train_target_list)
-
                 # Add the 'nothing' class column to both targets and predictions based on original 4 classes
                 train_target_all_with_nothing = add_nothing_class(train_target_all)
                 train_pred_all_with_nothing = add_nothing_class(train_pred_all)
-
                 # Overall weighted F1 (using 5 classes now)
                 try:
                     train_f1_weighted = f1_score(
@@ -1263,7 +1024,6 @@ def _(
                     print(f"Warning: Could not calculate training weighted F1: {e}")
                     train_f1_weighted = 0.0
                 train_f1s.append(train_f1_weighted)
-
                 # Per-class F1 scores (for 5 classes)
                 try:
                     train_f1_class = f1_score(
@@ -1279,7 +1039,6 @@ def _(
                     # If there are no positive samples for a class, set F1 to 0
                     for i in range(num_total_classes):  # Loop for 5 classes now
                         train_f1_per_class[i].append(0.0)
-
                 # Per-class accuracy (for 5 classes)
                 for i in range(num_total_classes):  # Loop for 5 classes now
                     class_pred = train_pred_all_with_nothing[:, i]
@@ -1288,7 +1047,6 @@ def _(
                         accuracy_score(class_target, class_pred) * 100
                     )  # Use sklearn accuracy
                     train_acc_per_class[i].append(class_acc)
-
                 train_acc = 100.0 * train_correct / train_total
                 avg_train_loss = train_loss / len(train_loader)
                 train_losses.append(avg_train_loss)
@@ -1300,20 +1058,21 @@ def _(
                 val_correct = 0
                 val_total = 0
                 val_predictions, val_targets, val_scores = [], [], []
-
-                with torch.no_grad():
+                with torch.no_grad(): # Disable gradient calculation for validation
                     for data, target in val_loader:
+                        # --- Move data and target to the device ---
+                        data, target = data.to(device), target.to(device)
+
                         output = model(data)
                         loss = criterion(output, target)
                         val_loss += loss.item()
-
                         # Use sigmoid probabilities with 0.5 threshold (like original)
                         probabilities = torch.sigmoid(output)
                         predicted = (probabilities > 0.5).float()
                         scores = probabilities  # Use probabilities for ROC curves
                         val_total += target.numel()
                         val_correct += (predicted == target).sum().item()
-
+                        # Move tensors back to CPU for numpy operations
                         val_predictions.extend(predicted.cpu().numpy())
                         val_targets.extend(target.cpu().numpy())
                         val_scores.extend(scores.cpu().numpy())
@@ -1321,11 +1080,9 @@ def _(
                 # Calculate validation metrics
                 val_pred_all = np.array(val_predictions)
                 val_target_all = np.array(val_targets)
-
                 # Add the 'nothing' class column to both targets and predictions based on original 4 classes
                 val_target_all_with_nothing = add_nothing_class(val_target_all)
                 val_pred_all_with_nothing = add_nothing_class(val_pred_all)
-
                 # Overall weighted F1 (using 5 classes now)
                 try:
                     val_f1_weighted = f1_score(
@@ -1338,7 +1095,6 @@ def _(
                     print(f"Warning: Could not calculate validation weighted F1: {e}")
                     val_f1_weighted = 0.0
                 val_f1s.append(val_f1_weighted)
-
                 # Per-class F1 scores (for 5 classes)
                 try:
                     val_f1_class = f1_score(
@@ -1354,7 +1110,6 @@ def _(
                     # If there are no positive samples for a class, set F1 to 0
                     for i in range(num_total_classes):  # Loop for 5 classes now
                         val_f1_per_class[i].append(0.0)
-
                 # Per-class accuracy (for 5 classes)
                 for i in range(num_total_classes):  # Loop for 5 classes now
                     class_pred = val_pred_all_with_nothing[:, i]
@@ -1363,7 +1118,6 @@ def _(
                         accuracy_score(class_target, class_pred) * 100
                     )  # Use sklearn accuracy
                     val_acc_per_class[i].append(class_acc)
-
                 val_acc = 100.0 * val_correct / val_total
                 avg_val_loss = val_loss / len(val_loader)
                 val_losses.append(avg_val_loss)
@@ -1383,7 +1137,6 @@ def _(
                         train_acc_per_class[i][-1],
                         step=epoch,
                     )
-
                 mlflow.log_metric("val_loss", avg_val_loss, step=epoch)
                 mlflow.log_metric("val_accuracy", val_acc, step=epoch)
                 mlflow.log_metric("val_f1_weighted", val_f1_weighted, step=epoch)
@@ -1415,11 +1168,10 @@ def _(
                 print(f"  Val F1 per class: {class_f1_str}")
                 print(f"  Val Acc per class: {class_acc_str}")
 
-            # Final comprehensive evaluation
+            # Final comprehensive evaluation (using CPU for final numpy/scikit-learn calculations)
             val_predictions = np.array(val_predictions)
             val_targets = np.array(val_targets)
             val_scores = np.array(val_scores)  # Keep original scores for ROC
-
             # Add 'nothing' class for final metric calculation
             val_targets_with_nothing = add_nothing_class(val_targets)
             val_predictions_with_nothing = add_nothing_class(val_predictions)
@@ -1480,7 +1232,6 @@ def _(
                 mlflow.log_metric(
                     f"val_f1_{class_name}", report[class_name]["f1-score"]
                 )
-
             # Also log macro and weighted averages
             mlflow.log_metric("val_f1_macro", report["macro avg"]["f1-score"])
             mlflow.log_metric("val_f1_weighted", report["weighted avg"]["f1-score"])
@@ -1525,6 +1276,7 @@ def _(
             Total Parameters: {total_params:,}
             Trainable Parameters: {trainable_params:,}
             Layers: {len(model.layers_config)}
+            Device: {device}
             Training Configuration:
             - Epochs: {epochs}
             - Learning Rate: {learning_rate}
@@ -1570,10 +1322,12 @@ def _(
             plt.close(roc_fig)
 
             # Create and log prediction examples (including 'nothing' in plots if applicable)
+            # --- CRITICAL: Pass the device to the plotting function ---
             pred_examples_fig = plot_wrong_prediction_examples(
                 model,
                 val_loader,
                 class_names,  # Pass updated class names
+                device=device # Pass the device
             )
             if (
                 pred_examples_fig is not None
@@ -1647,6 +1401,7 @@ def _(
                 "layers_config": model.layers_config,
                 "total_params": total_params,
                 "trainable_params": trainable_params,
+                "training_device": str(device) # Include device in config
             }
             # Save architecture config as JSON
             tmp_arch_file = tempfile.NamedTemporaryFile(
@@ -1659,9 +1414,10 @@ def _(
 
             # Log model with input example and include architecture info
             sample_batch, _ = next(iter(train_loader))
-            input_example = sample_batch[:1].numpy()
+            # Move sample batch to device for logging example, then back to CPU for MLflow
+            input_example = sample_batch[:1].to(device).cpu().numpy()
             mlflow.pytorch.log_model(
-                pytorch_model=model,
+                pytorch_model=model, # The model is already on the device, but MLflow handles this
                 name=f"{run_name}_model",
                 input_example=input_example,
                 pip_requirements=[
@@ -1686,117 +1442,243 @@ def _(
             return model
 
 
-def evaluate_model(model, test_loader):
-    """
-    Evaluate the model and log metrics for multi-label classification
-    """
-    model.eval()
-    correct = 0
-    total = 0
-    with torch.no_grad():
-        for data, target in test_loader:
-            outputs = model(data)
-            probabilities = torch.sigmoid(outputs)
-            predicted = (probabilities > 0.5).float()
-            total += target.numel()
-            correct += (predicted == target).sum().item()
-
-    accuracy = 100 * correct / total
-    # Log evaluation metrics if MLflow is active
-    if mlflow.active_run():
-        mlflow.log_metric("test_accuracy", accuracy)
-    return accuracy
-
-    def predict_single_image(model, image_array, threshold=0.0):
+    # You also need to update the plot_wrong_prediction_examples function to accept and use the device:
+    def plot_wrong_prediction_examples(model, test_loader, class_names, num_examples=4, device='cpu'):
         """
-        Predict a single image with your trained multi-label model
-        Args:
-            model: Trained PyTorch model
-            image_array: numpy array of shape (H, W) or (H, W, C)
-            threshold: threshold for converting logits to binary predictions (default 0.0)
-        Returns:
-            predictions: numpy array of shape (4,) with binary values [0, 1, 0, 1]
-            logits: raw model outputs before thresholding
+        Visualize only false prediction examples (where any class is mispredicted).
+        For multi-label classification, a prediction is considered false if
+        predicted vector != true vector.
         """
-        model.eval()  # Set model to evaluation mode
-
-        # Preprocess the image to match training format
-        if len(image_array.shape) == 2:  # (H, W) - Grayscale
-            processed_image = np.expand_dims(image_array, axis=0)  # -> (1, H, W)
-        elif len(image_array.shape) == 3:  # (H, W, 3) - RGB
-            # Convert RGB to grayscale if needed
-            processed_image = np.dot(image_array[..., :3], [0.2989, 0.5870, 0.1140])
-            processed_image = np.expand_dims(processed_image, axis=0)  # -> (1, H, W)
-
-        # Normalize and convert to tensor
-        processed_image = torch.FloatTensor(processed_image) / 255.0
-        processed_image = processed_image.unsqueeze(
-            0
-        )  # Add batch dimension -> (1, 1, H, W)
-
-        with torch.no_grad():  # Disable gradient computation for inference
-            logits = model(processed_image)
-            predictions = (
-                logits > threshold
-            ).float()  # Apply threshold to get binary predictions
-
-        return predictions.numpy()[0], logits.numpy()[0]  # Remove batch dimension
-
-    def predict_batch(model, image_batch, threshold=0.0):
-        """
-        Predict a batch of images
-        Args:
-            model: Trained PyTorch model
-            image_batch: numpy array of shape (N, H, W) or (N, H, W, 1) or (N, H, W, 3)
-            threshold: threshold for converting logits to binary predictions
-        Returns:
-            predictions: numpy array of shape (N, 4) with binary values
-            logits: raw model outputs before thresholding
-        """
+        device = torch.device(device) # Ensure device is a torch.device object
         model.eval()
-
-        # Convert to tensor and preprocess
-        if isinstance(image_batch, np.ndarray):
-            image_batch = torch.FloatTensor(image_batch)
-
-        # Normalize
-        image_batch = image_batch / 255.0
-
-        # Add channel dimension if needed
-        if len(image_batch.shape) == 3:  # (N, H, W)
-            image_batch = image_batch.unsqueeze(1)  # -> (N, 1, H, W)
-        elif len(image_batch.shape) == 4 and image_batch.shape[3] == 3:  # (N, H, W, 3)
-            # Convert RGB to grayscale
-            image_batch = torch.matmul(
-                image_batch, torch.tensor([0.2989, 0.5870, 0.1140], dtype=torch.float32)
-            )
-            image_batch = image_batch.unsqueeze(1)  # -> (N, 1, H, W)
-
+        images, true_labels, pred_labels, pred_scores = [], [], [], []
         with torch.no_grad():
-            logits = model(image_batch)
-            predictions = (logits > threshold).float()
+            for data, target in test_loader:
+                # --- Move data and target to the specified device ---
+                data, target = data.to(device), target.to(device)
 
-        return predictions.numpy(), logits.numpy()
+                outputs = model(data)
+                probabilities = torch.sigmoid(outputs)
+                predictions = (probabilities > 0.5).float()
+                # Convert to numpy for comparison
+                pred_np = predictions.cpu().numpy() # Move back to CPU for numpy
+                target_np = target.cpu().numpy()   # Move back to CPU for numpy
+                data_np = data.cpu().numpy()       # Move back to CPU for plotting
+                # Find indices where prediction != target (any class differs)
+                mismatches = np.any(pred_np != target_np, axis=1)
+                # Collect only the false examples
+                for i in range(len(mismatches)):
+                    if mismatches[i] and len(images) < num_examples:
+                        images.append(data_np[i][0])  # Grayscale channel
+                        true_labels.append(target_np[i])
+                        pred_labels.append(pred_np[i])
+                        pred_scores.append(probabilities[i].cpu().numpy()) # Move scores back to CPU
+                if len(images) >= num_examples:
+                    break
 
-    # To interpret the results:
-    def interpret_predictions(
-        predictions, class_names=["forward", "back", "left", "right"]
-    ):
-        """
-        Interpret the model predictions
-        """
-        result = {}
-        for i, pred in enumerate(predictions):
-            result[class_names[i]] = int(pred)
+        if len(images) == 0:
+            print("No false predictions found in the provided data.")
+            return None
 
-        # Print human-readable result
-        active_actions = [
-            class_names[i] for i, pred in enumerate(predictions) if pred > 0
-        ]
-        print(f"Predicted actions: {active_actions}")
-        print(f"Detailed: {result}")
-        return result
+        # Ensure labels/preds/scores have 'nothing' column if needed
+        true_labels_np = np.array(true_labels)
+        pred_labels_np = np.array(pred_labels)
+        pred_scores_np = np.array(pred_scores)
+        if len(class_names) == 5:
+            true_labels_np = add_nothing_class(true_labels_np)
+            pred_labels_np = add_nothing_class(pred_labels_np)
+            # Similar logic for scores as in plot_prediction_examples if needed
+            max_probs = np.max(pred_scores_np, axis=1, keepdims=True)  # Shape (N, 1)
+            prob_nothing = 1 - max_probs  # Shape (N, 1)
+            scores_for_plot = np.concatenate(
+                [pred_scores_np, prob_nothing], axis=1
+            )  # Shape (N, 5)
+        else:
+            scores_for_plot = pred_scores_np
 
+        # Create figure
+        fig = plt.figure(figsize=(12, 3 * len(images)))
+        gs = gridspec.GridSpec(len(images), 1, hspace=0.4)
+        # Use a color map or list that can handle the number of classes
+        num_plot_classes = len(class_names)
+        colors = plt.cm.get_cmap("tab10", num_plot_classes)(range(num_plot_classes))
+        # If you have a specific color list, ensure it's long enough
+        # colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"] # Example for 5 classes
+        for i in range(len(images)):
+            img = images[i]
+            true_label = true_labels_np[i]  # Use potentially updated labels
+            pred_label = pred_labels_np[i]  # Use potentially updated preds
+            pred_score = scores_for_plot[i]  # Use potentially updated scores
+            # Sub-grid: image + bar plot
+            sub_gs = gridspec.GridSpecFromSubplotSpec(
+                2, 1, gs[i], height_ratios=[2, 1], hspace=0.3
+            )
+            # Image subplot
+            ax_img = fig.add_subplot(sub_gs[0])
+            ax_img.imshow(img, cmap="gray")
+            true_actions = [
+                class_names[j] for j, val in enumerate(true_label) if val > 0
+            ] or ["none"]  # Or class_names[-1] if always including 'nothing'
+            pred_actions = [
+                class_names[j] for j, val in enumerate(pred_label) if val > 0
+            ] or ["none"]  # Or class_names[-1] if always including 'nothing'
+            title = f"True: {', '.join(true_actions)} | Pred: {', '.join(pred_actions)}"
+            ax_img.set_title(title, fontsize=10, color="red")  # Red to highlight error
+            ax_img.axis("off")
+            # Bar plot subplot
+            ax_bar = fig.add_subplot(sub_gs[1])
+            bars = ax_bar.bar(
+                class_names,
+                pred_score,
+                color=colors,
+                alpha=0.7,
+            )
+            ax_bar.set_ylim(0, 1)
+            ax_bar.set_ylabel("Prob", fontsize=8)
+            ax_bar.tick_params(axis="x", labelsize=8)
+            ax_bar.tick_params(axis="y", labelsize=8)
+            ax_bar.grid(axis="y", alpha=0.3, linestyle="--")
+            # Add score labels on bars
+            for bar, score in zip(bars, pred_score):
+                ax_bar.text(
+                    bar.get_x() + bar.get_width() / 2.0,
+                    bar.get_height() + 0.02,
+                    f"{score:.2f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7,
+                )
+        plt.tight_layout()
+        return fig
+
+    # You should also update plot_prediction_examples similarly if it's called elsewhere:
+    def plot_prediction_examples(model, test_loader, class_names, num_examples=4, device='cpu'):
+        """Visualize prediction examples with bar plots under images - Updated for N classes"""
+        device = torch.device(device) # Ensure device is a torch.device object
+        model.eval()
+        images, true_labels, pred_labels, pred_scores = [], [], [], []
+        with torch.no_grad():
+            for data, target in test_loader:
+                # --- Move data and target to the device ---
+                data, target = data.to(device), target.to(device)
+
+                outputs = model(data)
+                predictions = (torch.sigmoid(outputs) > 0.5).float()
+                scores = torch.sigmoid(outputs)  # Convert logits to probabilities
+                # Store examples
+                images.extend(data.cpu().numpy()[:2])
+                true_labels.extend(target.cpu().numpy()[:2])
+                pred_labels.extend(predictions.cpu().numpy()[:2])
+                pred_scores.extend(scores.cpu().numpy()[:2])
+                if len(images) >= num_examples:
+                    break
+
+        # Ensure labels/preds/scores have 'nothing' column if needed
+        # This function assumes the class_names list passed in already includes 'nothing'
+        # and the model outputs are for the original 4 classes.
+        # We add 'nothing' here based on the original 4 classes in the labels/preds/scores.
+        true_labels_np = np.array(true_labels)
+        pred_labels_np = np.array(pred_labels)
+        pred_scores_np = np.array(pred_scores)
+        # Only add 'nothing' if class_names indicates it should be there (i.e., length 5)
+        if len(class_names) == 5:
+            true_labels_np = add_nothing_class(true_labels_np)
+            pred_labels_np = add_nothing_class(pred_labels_np)
+            # For scores, the 'nothing' probability is 1 if all original are 0, else 0 (or derive from model somehow)
+            # For simplicity here, we'll just add a column of zeros to scores, as the model doesn't predict 'nothing' directly.
+            # If you want the model to predict 'nothing' probability, you'd need to modify the model.
+            # For now, we calculate 'nothing' only for labels/preds for metrics.
+            # Let's just pass the original scores to the bar plot for the original classes.
+            # We need to adjust the plotting loop to handle the score array correctly.
+            scores_for_plot = pred_scores_np  # Use original scores for plotting
+            if scores_for_plot.shape[1] < len(
+                class_names
+            ):  # If scores array is missing 'nothing'
+                # Add a column of zeros or calculate 'nothing' score (e.g., 1 - max of others, or 1 if all others < 0.5)
+                # For now, adding zeros is simplest if the model doesn't predict 'nothing'
+                # Let's assume the model scores are for 4 classes, and we add a 'nothing' score column.
+                # A simple 'nothing' score could be: prob_nothing = 1 if all original probs < 0.5 else 0
+                # Or prob_nothing = 1 - max(original_probs)
+                # Let's use prob_nothing = 1 - max(original_probs) for a continuous score.
+                max_probs = np.max(
+                    pred_scores_np, axis=1, keepdims=True
+                )  # Shape (N, 1)
+                prob_nothing = 1 - max_probs  # Shape (N, 1)
+                scores_for_plot = np.concatenate(
+                    [pred_scores_np, prob_nothing], axis=1
+                )  # Shape (N, 5)
+        else:
+            scores_for_plot = (
+                pred_scores_np  # Use original scores if 'nothing' not expected
+            )
+
+        # Create figure with custom grid for image + bar plot layout
+        fig = plt.figure(figsize=(12, 10))
+        gs = gridspec.GridSpec(
+            num_examples, 1, height_ratios=[3] * num_examples, hspace=0.4
+        )
+        # Use a color map or list that can handle the number of classes
+        num_plot_classes = len(class_names)
+        colors = plt.cm.get_cmap("tab10", num_plot_classes)(range(num_plot_classes))
+        # If you have a specific color list, ensure it's long enough
+        # colors = ["#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd"] # Example for 5 classes
+        for i in range(min(num_examples, len(images))):
+            img = images[i][0]  # Grayscale channel
+            true_label = true_labels_np[i]  # Use potentially updated labels
+            pred_label = pred_labels_np[i]  # Use potentially updated preds
+            pred_score = scores_for_plot[i]  # Use potentially updated scores
+            # Create sub-grid for each example (image + bar plot)
+            sub_gs = gridspec.GridSpecFromSubplotSpec(
+                2, 1, gs[i], height_ratios=[2, 1], hspace=0.3
+            )
+            # Image subplot
+            ax_img = fig.add_subplot(sub_gs[0])
+            ax_img.imshow(img, cmap="gray")
+            # Create title with true and predicted labels
+            true_actions = [
+                class_names[j] for j, val in enumerate(true_label) if val > 0
+            ]
+            pred_actions = [
+                class_names[j] for j, val in enumerate(pred_label) if val > 0
+            ]
+            if not true_actions:
+                true_actions = [
+                    "none"
+                ]  # Or class_names[-1] if always including 'nothing'
+            if not pred_actions:
+                pred_actions = [
+                    "none"
+                ]  # Or class_names[-1] if always including 'nothing'
+            title = f"True: {', '.join(true_actions)} | Pred: {', '.join(pred_actions)}"
+            ax_img.set_title(title, fontsize=10)
+            ax_img.axis("off")
+            # Bar plot subplot
+            ax_bar = fig.add_subplot(sub_gs[1])
+            bars = ax_bar.bar(
+                class_names,
+                pred_score,
+                color=colors,
+                alpha=0.7,
+            )
+            ax_bar.set_ylim(0, 1)
+            ax_bar.set_ylabel("Prob", fontsize=8)
+            ax_bar.tick_params(axis="x", labelsize=8)
+            ax_bar.tick_params(axis="y", labelsize=8)
+            # Add value labels on bars
+            for j, (bar, score) in enumerate(zip(bars, pred_score)):
+                ax_bar.text(
+                    bar.get_x() + bar.get_width() / 2.0,
+                    bar.get_height() + 0.02,
+                    f"{score:.2f}",
+                    ha="center",
+                    va="bottom",
+                    fontsize=7,
+                )
+            # Add grid for better readability
+            ax_bar.grid(axis="y", alpha=0.3, linestyle="--")
+
+        plt.tight_layout()
+        return fig
     return (FlexibleCNN,)
 
 
@@ -1830,7 +1712,6 @@ def _(Dataset, np, torch):
             label = torch.FloatTensor(label)  # Keep as one-hot vector for multi-label
 
             return image, label
-
     return (CnnImageDataset,)
 
 
@@ -1847,8 +1728,8 @@ def _(
     cnn_train_dataset = CnnImageDataset(cnn_X_train, cnn_y_train)
     cnn_test_dataset = CnnImageDataset(cnn_X_test, cnn_y_test)
 
-    cnn_train_loader = DataLoader(cnn_train_dataset, batch_size=32, shuffle=True)
-    cnn_test_loader = DataLoader(cnn_test_dataset, batch_size=32, shuffle=False)
+    cnn_train_loader = DataLoader(cnn_train_dataset, batch_size=128, shuffle=True)
+    cnn_test_loader = DataLoader(cnn_test_dataset, batch_size=128, shuffle=False)
     return
 
 
@@ -1969,21 +1850,19 @@ def _(FlexibleCNN, images_height, images_width, mlflow, os):
 
     print(f"MLflow tracking URI: {mlflow.get_tracking_uri()}")
 
-    cnn_weights = [1.5, 1.0, 2.0, 2.0]  # Forward / Back / Left / Right
-
+    cnn_weights = [1.5, 0.2, 3.0, 3.0]  # Forward / Back / Left / Right
     """
     train_model(
         cnn_model,
         cnn_train_loader,
         cnn_test_loader,
-        epochs=1,
+        epochs=30,
         learning_rate=0.001,
         experiment_name=cnn_experiment_name,
-        run_name="test",
+        run_name="not_so_simple_30_epoch_with_batch_norm_different_weight_batch_size_128",
         weights=cnn_weights
     )
     """
-
     return
 
 
@@ -1999,7 +1878,7 @@ def _():
     return (num_previous_frames,)
 
 
-@app.cell(disabled=True)
+@app.cell(disabled=True, hide_code=True)
 def _(pl):
     def create_df_previous_frames(df_augmented, num_previous_frames):
         # Sort by record and frame_idx to ensure proper ordering
@@ -2074,7 +1953,6 @@ def _(pl):
         # Create final DataFrame and sort
         df_result = pl.DataFrame(result_rows)
         return df_result.sort(["record", "frame_idx", "is_augmented"])
-
     return (create_df_previous_frames,)
 
 
@@ -2085,7 +1963,7 @@ def _(create_df_previous_frames, df_augmented, num_previous_frames):
     return (df_previous_frames,)
 
 
-@app.cell(disabled=True)
+@app.cell(disabled=True, hide_code=True)
 def _(df_previous_frames, np, num_previous_frames, pl):
     # Get all image columns that need to be converted
     image_columns = ["image_preprocessed"] + [
@@ -2113,7 +1991,7 @@ def _(df_previous_frames_array_image):
     return
 
 
-@app.cell(disabled=True)
+@app.cell(disabled=True, hide_code=True)
 def _(df_previous_frames_array_image, np, num_previous_frames, pl):
     def stack_images(row_dict, num_prev_frames):
         """Stack images along the channel dimension"""
@@ -2170,7 +2048,7 @@ def _(df_previous_frames_array_stacked):
     return
 
 
-@app.cell(disabled=True)
+@app.cell(disabled=True, hide_code=True)
 def _(df_previous_frames_array_stacked, train_test_split):
     temporal_cnn_df_train, temporal_cnn_df_test = train_test_split(
         df_previous_frames_array_stacked, test_size=0.2, random_state=42
@@ -2210,7 +2088,7 @@ def _(temporal_cnn_y_test):
     return
 
 
-@app.cell(disabled=True)
+@app.cell(disabled=True, hide_code=True)
 def _(temporal_cnn_X_train):
     temporal_sample_image = temporal_cnn_X_train[
         temporal_cnn_X_train.columns[0]
@@ -2219,7 +2097,7 @@ def _(temporal_cnn_X_train):
     return
 
 
-@app.cell(disabled=True)
+@app.cell(disabled=True, hide_code=True)
 def _(Dataset, np, torch):
     class TemporalCnnImageDataset(Dataset):
         def __init__(self, images_df, labels_df):
@@ -2252,11 +2130,10 @@ def _(Dataset, np, torch):
             label = torch.FloatTensor(label)  # Keep as one-hot vector for multi-label
 
             return image, label
-
     return (TemporalCnnImageDataset,)
 
 
-@app.cell(disabled=True)
+@app.cell(disabled=True, hide_code=True)
 def _(
     DataLoader,
     TemporalCnnImageDataset,
@@ -2282,7 +2159,7 @@ def _(
     return
 
 
-@app.cell
+@app.cell(hide_code=True)
 def _(load_dotenv, os):
     load_dotenv()
     temporal_cnn_experiment_name = os.getenv(
@@ -2291,7 +2168,7 @@ def _(load_dotenv, os):
     return
 
 
-@app.cell(disabled=True)
+@app.cell(disabled=True, hide_code=True)
 def _(
     FlexibleCNN,
     images_height,
@@ -2392,7 +2269,6 @@ def _(
         weights=temporal_cnn_weights
     )
     """
-
     return
 
 
