@@ -219,21 +219,51 @@ class GeneticAlgorithm:
             with open(segment_file) as f:
                 data = json.load(f)
             base_actions = [item["input"] for item in data]
-            # Store initial conditions
-            initial = data[0]
-            self.initial_angle = initial["angle"]
-            self.initial_speed = initial["speed"]
-            self.initial_position = json.loads(initial["position"])
-            self.original_positions = [json.loads(item["position"]) for item in data]
-            self.original_angles = [item["angle"] for item in data]
-            print(f"Using segment inputs from {segment_file} as base actions")
+            print(f"Loaded segment inputs from {segment_file} as base actions")
         else:
             print(f"No segment file found at {segment_file}")
             exit()
+
+        # Set initial conditions based on previous segment's run
+        if self.segment == 0:
+            self.initial_angle = 0
+            self.initial_speed = 0
+            self.initial_position = [0, 0, 0]
+        else:
+            prev_segment_file = f"{self.base_record_path}/records/segment_{self.segment - 1}/record.json"
+            if os.path.exists(prev_segment_file):
+                with open(prev_segment_file) as f:
+                    prev_data = json.load(f)
+                last = prev_data[-1]
+                self.initial_angle = last["angle"]
+                self.initial_speed = last["speed"]
+                self.initial_position = json.loads(last["position"])
+                print(
+                    f"Using final state from previous segment {self.segment - 1} as initial conditions"
+                )
+            else:
+                print(
+                    f"Warning: previous segment record not found at {prev_segment_file}, using default initial"
+                )
+                self.initial_angle = 0
+                self.initial_speed = 0
+                self.initial_position = [0, 0, 0]
+
         # Extend base actions to 1.5 times length with [0, 0, 0, 0]
         len_base = len(base_actions)
         extended_len = int(len_base * 1.5)
         extended_actions = base_actions + [[0, 0, 0, 0]] * (extended_len - len_base)
+
+        # Play the extended actions in the game to get the trajectory
+        print("Playing extended base actions in the game to get trajectory...")
+        temp_population = [extended_actions]
+        self.population = temp_population
+        self._evaluate_population_in_game(generation=0)
+        self.original_positions = (
+            self.individual_positions[0] if self.individual_positions else []
+        )
+        self.original_angles = []  # Angles not saved in trajectory, can load from record if needed
+
         # All individuals are mutations of extended actions
         population = [
             self.mutate_actions(extended_actions, self.mutation_rate)
