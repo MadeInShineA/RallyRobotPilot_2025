@@ -79,6 +79,7 @@ def _(mo):
 def _(Image, lzma, os, pickle, pl):
     record_dir = "./image_records/"
 
+
     all_records = []  # Accumulate all records here
 
     for filename in os.listdir(record_dir):
@@ -216,7 +217,7 @@ def _(Image):
 
 @app.cell
 def _(df_cleaned, pl, preprocess_image):
-    images_dimensions = (160, 128)
+    images_dimensions = (128, 128)
     images_width, images_height = images_dimensions
 
     df_cleaned_pil_preprocessed = df_cleaned.with_columns(
@@ -391,6 +392,7 @@ def _(Image, df_cleaned_pil_preprocessed, pl):
             augmented_rows.append(new_row)
 
     df_augmented = pl.DataFrame(augmented_rows)
+
     return (df_augmented,)
 
 
@@ -1645,7 +1647,7 @@ def _(
 
         plt.tight_layout()
         return fig
-    return (FlexibleCNN,)
+    return FlexibleCNN, train_model
 
 
 @app.cell
@@ -1696,7 +1698,7 @@ def _(
 
     cnn_train_loader = DataLoader(cnn_train_dataset, batch_size=128, shuffle=True)
     cnn_test_loader = DataLoader(cnn_test_dataset, batch_size=128, shuffle=False)
-    return
+    return cnn_test_loader, cnn_train_loader
 
 
 @app.cell
@@ -1712,11 +1714,23 @@ def _(load_dotenv, os):
     cnn_experiment_name = os.getenv(
         "MLFLOW_CNN_EXPERIMENT_NAME", "default_cnn_experiment"
     )
-    return
+
+    cnn_experiment_name = "calypso_model_from_visual_cnn_experiment"
+    return (cnn_experiment_name,)
 
 
 @app.cell
-def _(FlexibleCNN, images_height, images_width, mlflow, os):
+def _(
+    FlexibleCNN,
+    cnn_experiment_name,
+    cnn_test_loader,
+    cnn_train_loader,
+    images_height,
+    images_width,
+    mlflow,
+    os,
+    train_model,
+):
     cnn_architectures = [
         (
             "simple_cnn",
@@ -1780,15 +1794,15 @@ def _(FlexibleCNN, images_height, images_width, mlflow, os):
                 ("batchnorm", {}),
                 ("relu", {}),
                 ("maxpool", {"kernel_size": 2, "stride": 2}),
-                ("dropout", {"p": 0.4}),
+                ("dropout", {"p": 0.3}),
                 # Classifier
                 ("flatten", {}),
-                ("linear", {"out_features": 256}),
+                ("linear", {"out_features": 128}),
                 ("relu", {}),
-                ("dropout", {"p": 0.4}),
+                ("dropout", {"p": 0.3}),
                 ("linear", {"out_features": 64}),
                 ("relu", {}),
-                ("dropout", {"p": 0.4}),
+                ("dropout", {"p": 0.3}),
                 ("linear", {"out_features": 4}),
             ],
         ),
@@ -1816,19 +1830,22 @@ def _(FlexibleCNN, images_height, images_width, mlflow, os):
 
     print(f"MLflow tracking URI: {mlflow.get_tracking_uri()}")
 
-    cnn_weights = [1.5, 0.2, 3.0, 3.0]  # Forward / Back / Left / Right
+    cnn_weights = [2, 2, 1.5, 1.5]  # Forward / Back / Left / Right
+
+
     """
     train_model(
         cnn_model,
         cnn_train_loader,
         cnn_test_loader,
-        epochs=30,
+        epochs=25,
         learning_rate=0.001,
         experiment_name=cnn_experiment_name,
-        run_name="not_so_simple_30_epoch_with_batch_norm_different_weight_batch_size_128",
+        run_name="not_so_simple_more_data_128_128_50_epoch",
         weights=cnn_weights
     )
     """
+
     return
 
 
